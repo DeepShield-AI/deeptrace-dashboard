@@ -1,0 +1,1 @@
+import{C as e,Y as t,k as n,n as r}from"./@vue-vendor-BiAdlnhr.js";import{d as i,u as a}from"./vue-vendor-DnD1-op5.js";r();var o=n({__name:`Redirect`,setup(n){let r=i(),o=a().params.path;return r.replace({path:o}),(n,r)=>(t(),e(`div`))}});export{o as default};

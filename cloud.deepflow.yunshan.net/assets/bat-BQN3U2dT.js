@@ -1,0 +1,1 @@
+import{Ai as e,ki as t}from"./other-vendor-nQc8cw6U.js";export{t as conf,e as language};

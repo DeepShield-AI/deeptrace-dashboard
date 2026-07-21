@@ -1,0 +1,1 @@
+import"./d3-vendor-Hbl8Isc-.js";import"./langium-vendor-BMu4Nv9e.js";import{L as e}from"./markdown-vendor-CmQELUoT.js";export{e as createPacketServices};

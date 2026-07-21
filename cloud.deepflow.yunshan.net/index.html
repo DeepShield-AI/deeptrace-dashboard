@@ -94,5 +94,20 @@
 
   <body>
     <div id="app"></div>
+    <div id="debug-errors" style="position:fixed;bottom:0;left:0;right:0;max-height:50vh;overflow:auto;background:#1a1a2e;color:#e94560;font:12px monospace;padding:8px;z-index:99999;display:none"></div>
+    <script>
+      var errBox = document.getElementById('debug-errors');
+      function showErr(msg) { errBox.style.display='block'; errBox.innerHTML += '<div>' + msg + '</div>'; }
+      window.onerror = function(msg, src, line, col, err) { showErr('[ERROR] ' + msg + ' at ' + (src||'') + ':' + line); };
+      window.addEventListener('unhandledrejection', function(e) { showErr('[PROMISE] ' + (e.reason && e.reason.message || e.reason || 'unknown')); });
+      setTimeout(function() {
+        var app = document.getElementById('app');
+        if (app && app.children.length === 0) {
+          showErr('[INFO] #app is empty after 5s - Vue may have failed to mount');
+          showErr('[INFO] URL: ' + location.href);
+          showErr('[INFO] Cookies: ' + document.cookie.substring(0, 200));
+        }
+      }, 5000);
+    </script>
   </body>
 </html>

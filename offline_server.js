@@ -1,8 +1,11 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const crypto = require('crypto');
+
+const UPSTREAM = 'cloud.deepflow.yunshan.net';
 
 const PORT = 8888;
 const STATIC_DIR = path.join(__dirname, 'cloud.deepflow.yunshan.net');
@@ -123,28 +126,59 @@ const server = http.createServer((req, res) => {
   }
 
   // Try local static file
-  if (serveStatic(req, res)) return;
+  if (serveStatic(req, res)) {
+    console.log(`📄 STATIC ${pathname}`);
+    return;
+  }
 
-  // Static extension not found locally -> cache
+  // Static extension not found locally -> fetch from upstream & save
   const ext = path.extname(pathname).toLowerCase();
   if (['.js', '.css', '.png', '.jpg', '.svg', '.ico', '.ttf', '.woff', '.woff2', '.gif', '.webp', '.map'].includes(ext)) {
+    console.log(`⬇️  FETCHING ${pathname}`);
+    const fetchUrl = `https://${UPSTREAM}${pathname}`;
+    https.get(fetchUrl, (upstream) => {
+      if (upstream.statusCode === 200) {
+        const chunks = [];
+        upstream.on('data', c => chunks.push(c));
+        upstream.on('end', () => {
+          const body = Buffer.concat(chunks);
+          const filePath = path.join(STATIC_DIR, pathname);
+          const dir = path.dirname(filePath);
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(filePath, body);
+          const ct = MIME_TYPES[ext] || 'application/octet-stream';
+          res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'public, max-age=31536000' });
+          res.end(body);
+          console.log(`✅ SAVED ${pathname} (${body.length}b)`);
+        });
+      } else {
+        console.log(`⚠️  UPSTREAM ${upstream.statusCode} ${pathname}`);
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    }).on('error', () => {
+      res.writeHead(404);
+      res.end('Not Found');
+    });
+    return;
+  }
+
+  // API paths -> try cache
+  if (pathname.startsWith('/api/')) {
     serveCached(req, res);
     return;
   }
 
-  // SPA routes -> index.html
-  const spaOnlyPaths = ['/', '/login', '/dashboard', '/tracing', '/network', '/application', '/infrastructure', '/alarm', '/setting', '/ai', '/reset'];
-  const isSpaRoute = spaOnlyPaths.some(p => pathname === p || pathname.startsWith(p + '/'));
-
-  if (isSpaRoute) {
-    const indexPath = path.join(STATIC_DIR, 'index.html');
+  // Everything else -> SPA fallback (index.html)
+  console.log(`🔀 SPA ${pathname}`);
+  const indexPath = path.join(STATIC_DIR, 'index.html');
+  if (fs.existsSync(indexPath)) {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(fs.readFileSync(indexPath));
-    return;
+  } else {
+    res.writeHead(404);
+    res.end('Not Found');
   }
-
-  // Everything else -> try API cache
-  serveCached(req, res);
 });
 
 server.listen(PORT, '0.0.0.0', () => {

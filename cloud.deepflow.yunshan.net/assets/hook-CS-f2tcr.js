@@ -1,0 +1,1 @@
+import{K as e,n as t}from"./@vue-vendor-BiAdlnhr.js";import{d as n,u as r}from"./vue-vendor-DnD1-op5.js";import{g as i}from"./Line-BUyR0Ugs.js";t();var a=t=>{let a=n(),o=r();e(async()=>{if(o.query.drawerProps)try{t(await i(o.query.drawerProps))}catch{a.replace({query:{...o.query,drawerProps:void 0}})}})};export{a as t};

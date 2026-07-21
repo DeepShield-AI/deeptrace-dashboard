@@ -1,0 +1,1 @@
+import{Dr as e,Or as t}from"./other-vendor-nQc8cw6U.js";export{e as conf,t as language};
