@@ -1,0 +1,1 @@
+import{a as e,r as t}from"./i18n-rDhRzd_D.js";var n={2:t.t(`resource.firewall`),1:t.t(`resource.switch`),3:t.t(`resource.router`),4:t.t(`resource.gateway`),5:t.t(`Internet接入`),6:t.t(`资源池接入`),7:t.t(`专线接入`),8:t.t(`其他`)};e(`自定义`);var r={1:7,2:6,3:8,4:9,5:37,6:11,7:12,8:13};export{r as n,n as t};

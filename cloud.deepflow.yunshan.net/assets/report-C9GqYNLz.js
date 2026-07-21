@@ -1,0 +1,1 @@
+import{a as e,r as t}from"./i18n-rDhRzd_D.js";var n={0:t.t(`日报表`),1:t.t(`周报表`),2:t.t(`月报表`)},r={"1h":e(`每小时`),"1d":e(`每天`)},i={1:`HTML`},a={1:e(`邮件`)};e(`周一`),e(`周二`),e(`周三`),e(`周四`),e(`周五`),e(`周六`),e(`周日`);for(var o=29,s=[],c=1;c<o;)s.push({text:`${c}${e(`日`)}`,value:c}),c+=1;export{n as i,i as n,r,a as t};

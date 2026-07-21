@@ -1,0 +1,1 @@
+.metric-grid[data-v-4cf2a736]{grid-template-columns:repeat(6,1fr)}.metric-grid-item[data-v-4cf2a736]{grid-column:span 2}.metric-grid-item[data-v-4cf2a736]:last-child:nth-child(3n+1){grid-column:span 6}.metric-grid-item[data-v-4cf2a736]:nth-last-child(2):nth-child(3n+1),.metric-grid-item[data-v-4cf2a736]:last-child:nth-child(3n+2){grid-column:span 3}

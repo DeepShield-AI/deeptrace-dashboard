@@ -1,0 +1,1 @@
+import{r as e}from"./i18n-rDhRzd_D.js";var t=20,n={21:{0:`--`,1:e.t(`虚拟机/计算`),2:e.t(`裸金属/计算`),3:e.t(`虚拟机/网络`),4:e.t(`裸金属/网络`),5:e.t(`虚拟机/存储`),6:e.t(`裸金属/存储`)},[t]:{2:e.t(`宿主机/EXSi`),3:e.t(`宿主机/KVM`),5:e.t(`宿主机/Hyper-V`),6:e.t(`宿主机/Gateway`)}};export{n as t};

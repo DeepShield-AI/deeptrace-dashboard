@@ -1,0 +1,1 @@
+import{n as e}from"./api-DbeYCvWZ.js";var t=function(e){return e.CUSTOM=`user_dashboard`,e.SYSTEM=`system_dashboard`,e}({});function n(){return e(`/monitor/list`,{data:{module_type:t.SYSTEM}})}export{t as n,n as t};

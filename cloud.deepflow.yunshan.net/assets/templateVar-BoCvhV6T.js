@@ -1,0 +1,1 @@
+var e=new Map([[`vtap_host`,{VARIABLE_NAME:`采集器名称`,TEMPLATE_ID:1}],[`node_name`,{VARIABLE_NAME:`数据节点名称`,TEMPLATE_ID:3}],[`node_ip`,{VARIABLE_NAME:`数据节点IP`,TEMPLATE_ID:3}],[`control_name`,{VARIABLE_NAME:`控制器名称`,TEMPLATE_ID:2}],[`control_ip`,{VARIABLE_NAME:`控制器IP`,TEMPLATE_ID:2}]]);export{e as t};

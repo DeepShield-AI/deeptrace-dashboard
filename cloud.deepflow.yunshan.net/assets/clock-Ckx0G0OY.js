@@ -1,0 +1,1 @@
+import{C as e,Y as t,b as n,n as r}from"./@vue-vendor-BiAdlnhr.js";r();var i={xmlns:`http://www.w3.org/2000/svg`,width:`12`,height:`12`,fill:`currentColor`,viewBox:`0 0 12 12`};function a(r,a){return t(),e(`svg`,i,[...a[0]||=[n(`path`,{d:`M6 11A5 5 0 1 1 6 1a5 5 0 0 1 0 10m.5-5V3.5h-1V7h3V6z`},null,-1)]])}var o={render:a};export{a as n,o as t};

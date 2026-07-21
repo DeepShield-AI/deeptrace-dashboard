@@ -1,0 +1,1 @@
+import{C as e}from"./utils-vendor-1-BNXmn1Ri.js";import{a as t}from"./i18n-rDhRzd_D.js";var n={0:`VXLAN`,1:`ERSPAN`,4:`TCP-NPB`},r={0:t(`无`),1:`VXLAN`,2:`IPIP`,3:`GRE`},i=e([{label:t(`整体赋值`),text:t(`整体赋值`),value:1,msg:t(`base.tunnel.vniInputHint.whole`)},{label:t(`均分两段赋值`),text:t(`均分两段赋值`),value:2,msg:t(`base.tunnel.vniInputHint.splitTwo`)}],`value`);export{n,i as r,r as t};

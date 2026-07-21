@@ -1,0 +1,1 @@
+function e(e){let t={};return e.filters&&Object.entries(e.filters).forEach(([e,n])=>{n!==void 0&&(t[e]=n===null?null:String(n))}),e.sourceName&&e.sourceType&&(t._source_type=e.sourceType,t._source_name=e.sourceName),{name:e.routeName,query:t}}export{e as t};

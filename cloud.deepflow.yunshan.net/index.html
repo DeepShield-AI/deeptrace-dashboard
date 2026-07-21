@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>self["MonacoEnvironment"] = (function (paths) {
+          return {
+            globalAPI: false,
+            getWorkerUrl : function (moduleId, label) {
+              var result =  paths[label];
+              if (/^((http:)|(https:)|(file:)|(\/\/))/.test(result)) {
+                var currentUrl = String(window.location);
+                var currentOrigin = currentUrl.substr(0, currentUrl.length - window.location.hash.length - window.location.search.length - window.location.pathname.length);
+                if (result.substring(0, currentOrigin.length) !== currentOrigin) {
+                  var js = '/*' + label + '*/importScripts("' + result + '");';
+                  var blob = new Blob([js], { type: 'application/javascript' });
+                  return URL.createObjectURL(blob);
+                }
+              }
+              return result;
+            }
+          };
+        })({
+  "editorWorkerService": "/monacoeditorwork/editor.worker.bundle.js"
+});</script>
+
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script type="module" src="/assets/app_config_user.js"></script>
+    <script type="module" src="/assets/app_config.js"></script>
+    <script type="module" src="/assets/checkChrome.js"></script>
+    <title>DeepFlow</title>
+    <script type="module" crossorigin src="/assets/index-BV1ABqqp.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/_plugin-vue_export-helper-CRt-r6Cj.js">
+    <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-C5c2KzVm.js">
+    <link rel="modulepreload" crossorigin href="/assets/@codemirror-vendor-BMiPqaS6.js">
+    <link rel="modulepreload" crossorigin href="/assets/@vue-vendor-BiAdlnhr.js">
+    <link rel="modulepreload" crossorigin href="/assets/i18n-rDhRzd_D.js">
+    <link rel="modulepreload" crossorigin href="/assets/d3-vendor-Hbl8Isc-.js">
+    <link rel="modulepreload" crossorigin href="/assets/langium-vendor-BMu4Nv9e.js">
+    <link rel="modulepreload" crossorigin href="/assets/browser-vendor-DzueQaQs.js">
+    <link rel="modulepreload" crossorigin href="/assets/algorithm-vendor-F4PoJiD8.js">
+    <link rel="modulepreload" crossorigin href="/assets/other-vendor-nQc8cw6U.js">
+    <link rel="modulepreload" crossorigin href="/assets/analysis-vendor-Bi61xtv2.js">
+    <link rel="modulepreload" crossorigin href="/assets/datetime-vendor-DytgT_Kc.js">
+    <link rel="modulepreload" crossorigin href="/assets/vue-vendor-DnD1-op5.js">
+    <link rel="modulepreload" crossorigin href="/assets/useDeleteConfirm-CWRXp-7P.js">
+    <link rel="modulepreload" crossorigin href="/assets/logger-tC2QQT1x.js">
+    <link rel="modulepreload" crossorigin href="/assets/utils-vendor-1-BNXmn1Ri.js">
+    <link rel="modulepreload" crossorigin href="/assets/tool-DPgdjGJj.js">
+    <link rel="modulepreload" crossorigin href="/assets/unit-CzQMEyJi.js">
+    <link rel="modulepreload" crossorigin href="/assets/ag-grid-vendor-DDlTIFNG.js">
+    <link rel="modulepreload" crossorigin href="/assets/vueuse-vendor-BgqSJQ2H.js">
+    <link rel="modulepreload" crossorigin href="/assets/AgTable-CMX62WfL.js">
+    <link rel="modulepreload" crossorigin href="/assets/checkCircleFill-CM3qTuGB.js">
+    <link rel="modulepreload" crossorigin href="/assets/checkCircleFillLarge-Co48GyHL.js">
+    <link rel="modulepreload" crossorigin href="/assets/close-BWz8PyRU.js">
+    <link rel="modulepreload" crossorigin href="/assets/closeCircleFill-uQeERiVP.js">
+    <link rel="modulepreload" crossorigin href="/assets/closeCircleFillLarge-D8hf2K4t.js">
+    <link rel="modulepreload" crossorigin href="/assets/exclamationCircleFillLarge-65EjcEIs.js">
+    <link rel="modulepreload" crossorigin href="/assets/loading-CGFZjCpK.js">
+    <link rel="modulepreload" crossorigin href="/assets/loadingSmall-B44kuL6Y.js">
+    <link rel="modulepreload" crossorigin href="/assets/user-CFq8J9ex.js">
+    <link rel="modulepreload" crossorigin href="/assets/mergeAppConfig-DgJ9youI.js">
+    <link rel="modulepreload" crossorigin href="/assets/data-vendor-Bni7qkoM.js">
+    <link rel="modulepreload" crossorigin href="/assets/http-vendor-Be4sc9Qt.js">
+    <link rel="modulepreload" crossorigin href="/assets/crypto-vendor-CP3gkDJw.js">
+    <link rel="modulepreload" crossorigin href="/assets/api-DbeYCvWZ.js">
+    <link rel="modulepreload" crossorigin href="/assets/tanstack-vendor-gKGA18yS.js">
+    <link rel="modulepreload" crossorigin href="/assets/validate-vendor-BKdy1PxM.js">
+    <link rel="modulepreload" crossorigin href="/assets/base-DJHp7qe-.js">
+    <link rel="modulepreload" crossorigin href="/assets/queryClient-CsIETJgP.js">
+    <link rel="modulepreload" crossorigin href="/assets/query-qivibuFx.js">
+    <link rel="modulepreload" crossorigin href="/assets/time-Bqe8w6Gx.js">
+    <link rel="modulepreload" crossorigin href="/assets/app-DIAuOXIE.js">
+    <link rel="modulepreload" crossorigin href="/assets/resourcePool-CZK4qGMI.js">
+    <link rel="modulepreload" crossorigin href="/assets/resource-CHtPfvij.js">
+    <link rel="modulepreload" crossorigin href="/assets/window-BHFLMnRd.js">
+    <link rel="modulepreload" crossorigin href="/assets/cytoscape-vendor-CmlxWVa7.js">
+    <link rel="modulepreload" crossorigin href="/assets/markdown-vendor-CmQELUoT.js">
+    <link rel="modulepreload" crossorigin href="/assets/ui-effects-vendor-Bcv0omCm.js">
+    <link rel="modulepreload" crossorigin href="/assets/echarts-vendor-DdBe8bGU.js">
+    <link rel="modulepreload" crossorigin href="/assets/vue-ext-vendor-7ubna-gh.js">
+    <link rel="stylesheet" crossorigin href="/assets/browser-vendor-R_POiqJ_.css">
+    <link rel="stylesheet" crossorigin href="/assets/other-vendor-lMmXi5eQ.css">
+    <link rel="stylesheet" crossorigin href="/assets/vue-vendor-dZcp7gjq.css">
+    <link rel="stylesheet" crossorigin href="/assets/ag-grid-vendor-Bi1G80_5.css">
+    <link rel="stylesheet" crossorigin href="/assets/AgTable-CslH9BD9.css">
+    <link rel="stylesheet" crossorigin href="/assets/markdown-vendor-Cyv6lCwm.css">
+    <link rel="stylesheet" crossorigin href="/assets/ui-effects-vendor-1oWo33m3.css">
+    <link rel="stylesheet" crossorigin href="/assets/vue-ext-vendor-BLlMA27I.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-DpzlTDZ6.css">
+    <link rel="stylesheet" crossorigin href="/assets/highlight-vendor-B-oHczHB.css">
+  </head>
+
+  <body>
+    <div id="app"></div>
+  </body>
+</html>

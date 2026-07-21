@@ -1,0 +1,1 @@
+import{C as e,Y as t,b as n,n as r}from"./@vue-vendor-BiAdlnhr.js";r();var i={xmlns:`http://www.w3.org/2000/svg`,width:`16`,height:`16`,viewBox:`0 0 16 16`};function a(r,a){return t(),e(`svg`,i,[...a[0]||=[n(`path`,{d:`M12.667 9.333v-6h-1.333V8H4.552l2.633-2.633-.942-.943L2 8.666l4.243 4.243.942-.943-2.633-2.633z`},null,-1)]])}var o={render:a};export{o as default,a as render};

@@ -1,0 +1,1 @@
+import{a as e}from"./tanstack-vendor-gKGA18yS.js";var t=new e({defaultOptions:{queries:{retry:!1,staleTime:300*1e3,gcTime:600*1e3}}});export{t};

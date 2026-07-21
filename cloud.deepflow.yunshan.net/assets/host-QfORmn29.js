@@ -1,0 +1,1 @@
+import{a as e}from"./i18n-rDhRzd_D.js";var t={0:e(`临时`),1:e(`创建中`),2:e(`正常`),3:e(`修改中`),4:e(`异常`),5:e(`维护`)},n={2:`ESXi`,3:`KVM`,5:`Hyper-V`,6:`Gateway`};export{t as n,n as t};

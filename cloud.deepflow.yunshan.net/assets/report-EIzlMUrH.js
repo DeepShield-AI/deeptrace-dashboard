@@ -1,0 +1,1 @@
+var e=function(e){return e[e.HTML=1]=`HTML`,e}({}),t=function(e){return e[e.DAYLY=0]=`DAYLY`,e[e.WEEKLY=1]=`WEEKLY`,e[e.MONTHLY=2]=`MONTHLY`,e}({}),n=function(e){return e.DAY=`1d`,e.HOUR=`1h`,e}({});export{n,t as r,e as t};

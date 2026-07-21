@@ -1,0 +1,1 @@
+import{a as e}from"./i18n-rDhRzd_D.js";var t={match:/^.{0,255}$/,message:e(`格式有误`)},n={match:/^(?!.*[<>].*[<>]).{0,128}$/,message:e(`请输入128位以内的字符，不可以同时输入 < 和 >`)},r=t=>({required:!0,message:`${t} ${e(`是必填项`)}`}),i=t=>({required:!0,type:`array`,min:1,message:`${t} ${e(`是必填项`)}`}),a={match:/^.{1,256}$/,message:e(`请输入 1~256 个字符`)};export{a,n as i,i as n,r,t};

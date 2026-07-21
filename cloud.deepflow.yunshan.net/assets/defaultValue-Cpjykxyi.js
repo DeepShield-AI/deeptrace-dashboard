@@ -1,0 +1,1 @@
+var e=function(e){return e.DOUBLE_HYPHEN=`--`,e}({});export{e as t};
