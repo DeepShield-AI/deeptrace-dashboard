@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/api/querier/v1/query/",
+  "requestBody": {
+    "db": "flow_metrics",
+    "sql": "SHOW TABLES"
+  },
+  "status": 200,
+  "responseBody": "{\"OPT_STATUS\":\"SUCCESS\",\"DESCRIPTION\":\"\",\"result\":{\"columns\":[\"name\",\"datasources\"],\"schemas\":[],\"values\":[[\"network\",[\"1s\",\"1m\",\"1h\",\"1d\"]],[\"network_map\",[\"1s\",\"1m\",\"1h\",\"1d\"]],[\"application\",[\"1s\",\"1m\",\"1h\",\"1d\"]],[\"application_map\",[\"1s\",\"1m\",\"1h\",\"1d\"]],[\"traffic_policy\",[\"1m\"]]]},\"debug\":null}",
+  "timestamp": "2026-07-21T09:45:08.766Z"
+}

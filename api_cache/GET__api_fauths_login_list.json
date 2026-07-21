@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/fauths/login_list",
+  "requestBody": null,
+  "status": 200,
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"DATA\": {\"1\": {\"name\": \"DeepFlow\", \"platform\": \"deepflow\", \"type\": \"deepflow\", \"format\": \"email\", \"login_account_mode\": [\"email\", \"phone\"], \"raw_input\": true}, \"2\": {\"name\": \"GitHub\", \"platform\": \"github\", \"type\": \"third_sso\", \"format\": \"username\", \"raw_input\": false}, \"3\": {\"name\": \"Google\", \"platform\": \"google\", \"type\": \"third_sso\", \"format\": \"username\", \"raw_input\": false}}, \"DESCRIPTION\": \"\"}",
+  "timestamp": "2026-07-21T09:45:07.260Z"
+}

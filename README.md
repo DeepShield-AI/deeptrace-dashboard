@@ -1,27 +1,52 @@
 # DeepTrace Dashboard
 
-Network observability dashboard with full API proxy support.
+Network observability dashboard — full website clone with two operating modes.
 
 ## Quick Start
+
+### Offline Mode (standalone, no internet needed)
+
+```bash
+node offline_server.js
+```
+
+All API responses served from local cache (352 recorded responses, 31MB).
+
+### Online Mode (reverse proxy)
 
 ```bash
 node server.js
 ```
 
+Static files served locally, API calls proxied to upstream.
+
+### Recording Mode (capture new API data)
+
+```bash
+node record_server.js
+```
+
+Browse the site normally — all API responses are recorded to `api_cache/` for offline use.
+
 Access at http://localhost:8888
 
 ## Architecture
 
-- Static frontend assets served locally (fast load)
-- API requests proxied to upstream backend
-- WebSocket upgrade support for real-time data
+- **676 static files** (JS/CSS/fonts/images) served locally
+- **352 cached API responses** for fully offline operation
+- Reverse proxy mode for live data
+- Recording proxy to capture new API interactions
+- WebSocket upgrade support
 - Cookie domain rewriting for seamless auth
 - SPA route fallback to index.html
 
 ## Structure
 
 ```
-├── server.js                          # Node.js reverse proxy server
+├── offline_server.js                  # Standalone offline server
+├── server.js                          # Online reverse proxy server
+├── record_server.js                   # Recording proxy server
+├── api_cache/                         # Cached API responses (352 files)
 ├── cloud.deepflow.yunshan.net/        # Static assets
 │   ├── index.html                     # SPA entry point
 │   ├── favicon.ico
@@ -32,6 +57,6 @@ Access at http://localhost:8888
 
 ## Configuration
 
-Edit `server.js` to change:
+Edit any server file to change:
 - `PORT` — Local server port (default: 8888)
-- `UPSTREAM` — Backend API server hostname
+- `UPSTREAM` — Backend API server hostname (proxy modes only)

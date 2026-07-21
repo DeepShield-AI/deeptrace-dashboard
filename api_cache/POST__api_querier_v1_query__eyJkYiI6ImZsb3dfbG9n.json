@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/api/querier/v1/query/",
+  "requestBody": {
+    "db": "flow_log",
+    "sql": "SHOW TABLES"
+  },
+  "status": 200,
+  "responseBody": "{\"OPT_STATUS\":\"SUCCESS\",\"DESCRIPTION\":\"\",\"result\":{\"columns\":[\"name\",\"datasources\"],\"schemas\":[],\"values\":[[\"l4_flow_log\",null],[\"l7_flow_log\",null],[\"l4_packet\",null],[\"l7_packet\",null]]},\"debug\":null}",
+  "timestamp": "2026-07-21T09:45:08.790Z"
+}

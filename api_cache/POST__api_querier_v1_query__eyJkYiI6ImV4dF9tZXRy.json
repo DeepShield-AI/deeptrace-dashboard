@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/api/querier/v1/query/",
+  "requestBody": {
+    "db": "ext_metrics",
+    "sql": "SHOW TABLES"
+  },
+  "status": 200,
+  "responseBody": "{\"OPT_STATUS\":\"SUCCESS\",\"DESCRIPTION\":\"\",\"result\":{\"columns\":[\"name\",\"datasources\"],\"schemas\":[],\"values\":null},\"debug\":null}",
+  "timestamp": "2026-07-21T09:45:08.819Z"
+}

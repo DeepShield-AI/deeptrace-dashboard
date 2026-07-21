@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/api/querier/v1/query/",
+  "requestBody": {
+    "db": "event",
+    "sql": "SHOW TABLES"
+  },
+  "status": 200,
+  "responseBody": "{\"OPT_STATUS\":\"SUCCESS\",\"DESCRIPTION\":\"\",\"result\":{\"columns\":[\"name\",\"datasources\"],\"schemas\":[],\"values\":[[\"event\",null],[\"file_event\",null],[\"file_agg_event\",null],[\"file_mgmt_event\",null],[\"proc_perm_event\",null],[\"proc_ops_event\",null],[\"proc_block_event\",null],[\"alert_event\",null],[\"alert_record\",null],[\"file_event_metrics\",[\"1s\"]]]},\"debug\":null}",
+  "timestamp": "2026-07-21T09:45:08.841Z"
+}
