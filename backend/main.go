@@ -654,7 +654,10 @@ func aggregateSpans(req querierListReq) []map[string]interface{} {
 	}
 	groups := map[string]*group{}
 
-	if isPair {
+	hasGroupTags := len(q.Tags) > 0 || strings.Contains(q.Select, "auto_service")
+
+	switch {
+	case isPair:
 		// Group by parent_service → service edges
 		for _, s := range spans {
 			pid, _ := s["parent_span_id"].(string)
@@ -668,7 +671,7 @@ func aggregateSpans(req querierListReq) []map[string]interface{} {
 			}
 			groups[gkey].spans = append(groups[gkey].spans, s)
 		}
-	} else {
+	case hasGroupTags:
 		// Group by auto_service
 		for _, s := range spans {
 			gkey := fmt.Sprintf("%v", s["auto_service"])
@@ -677,6 +680,10 @@ func aggregateSpans(req querierListReq) []map[string]interface{} {
 			}
 			groups[gkey].spans = append(groups[gkey].spans, s)
 		}
+	default:
+		// No grouping: single global group (e.g. Count(row) total query)
+		g := &group{rep: spans[0], spans: spans}
+		groups["_all"] = g
 	}
 
 	var rows []map[string]interface{}
