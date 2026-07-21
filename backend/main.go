@@ -688,7 +688,7 @@ func aggregateSpans(req querierListReq) []map[string]interface{} {
 
 	var rows []map[string]interface{}
 	for _, g := range groups {
-		row := map[string]interface{}{}
+		row := map[string]interface{}{"_querier_region": "本地"}
 		for _, se := range selects {
 			expr, key := se[0], se[1]
 			lower := strings.ToLower(expr)
@@ -721,14 +721,58 @@ func handleQuerierList(w http.ResponseWriter, r *http.Request) {
 			"network": true, "network_map": true,
 		}
 		if flowTables[req.Table] {
+			// Pure count query: reuse cached response structure, patch the count value
+			hasGroup := false
+			if len(req.Queries) > 0 {
+				hasGroup = len(req.Queries[0].Tags) > 0 || strings.Contains(req.Queries[0].Select, "auto_service")
+			}
+			if !hasGroup {
+				if cached := findCachedResponseWithBody(r.Method, r.URL.Path, bodyStr); cached != nil {
+					var resp map[string]interface{}
+					if json.Unmarshal(cached, &resp) == nil {
+						if data, ok2 := resp["DATA"].([]interface{}); ok2 {
+							for _, item := range data {
+								if row, ok3 := item.(map[string]interface{}); ok3 {
+									if _, has := row["count_row"]; has {
+										row["count_row"] = len(loadSpans())
+									}
+									if _, has := row["query_id"]; has {
+										row["query_id"] = extractQueryID(bodyStr)
+									}
+								}
+							}
+						}
+						w.Header().Set("Content-Type", "application/json")
+						json.NewEncoder(w).Encode(resp)
+						return
+					}
+				}
+			}
 			if rows := aggregateSpans(req); rows != nil {
+				// Build SCHEMAS from first row's keys
+				schemas := map[string]interface{}{}
+				if len(rows) > 0 {
+					for k, v := range rows[0] {
+						vt, tp := "String", 0
+						switch v.(type) {
+						case float64:
+							vt, tp = "Float64", 1
+						case int:
+							vt, tp = "UInt64", 1
+						}
+						schemas[k] = map[string]interface{}{
+							"label_type": "", "pre_as": "", "type": tp,
+							"unit": "", "value_type": vt,
+						}
+					}
+				}
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(map[string]interface{}{
 					"OPT_STATUS":  "SUCCESS",
 					"DATA":        rows,
 					"COUNT":       len(rows),
 					"TYPE":        "Application_Detail_List",
-					"SCHEMAS":     map[string]interface{}{},
+					"SCHEMAS":     schemas,
 					"DESCRIPTION": "",
 				})
 				return
@@ -867,17 +911,20 @@ func handleTraceMap(w http.ResponseWriter, r *http.Request) {
 	// Priority 1: generate from traces.json
 	if nodes := buildTraceMapNodes(); nodes != nil {
 		w.Header().Set("Content-Type", "application/json")
+		// Final line format matches real streaming response:
+		// last chunk has calculated==total and a debug key
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"OPT_STATUS": "SUCCESS",
-			"TYPE":       "TraceMap",
+			"TYPE": "TraceMap",
 			"DATA": map[string]interface{}{
 				"node_data": nodes,
 				"progress_info": map[string]interface{}{
-					"total_traces_count":      len(nodes),
-					"calculated_traces_count": len(nodes),
+					"total_traces_count":      1,
+					"calculated_traces_count": 1,
 				},
 			},
 			"DESCRIPTION": "",
+			"debug":       map[string]interface{}{"querier_debug": nil},
+			"OPT_STATUS":  "SUCCESS",
 		})
 		return
 	}
@@ -898,6 +945,7 @@ func handleTraceMap(w http.ResponseWriter, r *http.Request) {
 func handleQuerierTop(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	bodyStr := string(body)
+	log.Printf("📈 TOP body=%s", bodyStr[:min(len(bodyStr), 400)])
 	if cached := findCachedResponseWithBody(r.Method, r.URL.Path, bodyStr); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(rewriteQueryID(cached, extractQueryID(bodyStr)))
@@ -1086,6 +1134,16 @@ func handleDashboards(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleBiz(w http.ResponseWriter, r *http.Request) {
+	// Bare /biz/ (redirected from /biz): serve the cached biz list (array)
+	if strings.TrimSuffix(r.URL.Path, "/") == "/api/df-web/v1/biz" {
+		if cached := findCachedResponse(r.Method, "/api/df-web/v1/biz"); cached != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(cached)
+			return
+		}
+		ok(w, []interface{}{})
+		return
+	}
 	if cached := findCachedResponse(r.Method, r.URL.Path); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(cached)
