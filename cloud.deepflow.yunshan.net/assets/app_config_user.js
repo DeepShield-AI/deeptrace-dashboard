@@ -1,1 +1,1 @@
-window.APP_USER_CONFIG = { API_TIMEOUT: 300*1000, API_UPLOAD_TIMEOUT: 300*1000, DEFAULT_AI_MODEL: "deepflow-engine",IFRAME_PREFIX_URL:"https://cloud.deepflow.yunshan.net/df-web-core"}
+window.APP_USER_CONFIG = { API_TIMEOUT: 300*1000, API_UPLOAD_TIMEOUT: 300*1000, DEFAULT_AI_MODEL: "deepflow-engine", IFRAME_PREFIX_URL: "/df-web-core" }
