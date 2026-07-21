@@ -1,0 +1,1 @@
+import{K as e,n as t,wt as n}from"./@vue-vendor-BiAdlnhr.js";import{a as r}from"./logger-tC2QQT1x.js";import{D as i,T as a}from"./index-BV1ABqqp.js";t();var o=()=>{let t=n(!1);return e(()=>{r()||i().then(()=>{t.value=a()})}),t};export{o as t};
