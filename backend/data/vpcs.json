@@ -1,0 +1,4 @@
+[
+  {"ID": 1, "NAME": "vpc-production", "DOMAIN": "k8s-prod", "LCUUID": "vpc-001"},
+  {"ID": 2, "NAME": "vpc-middleware", "DOMAIN": "k8s-prod", "LCUUID": "vpc-002"}
+]

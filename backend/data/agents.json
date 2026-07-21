@@ -1,0 +1,5 @@
+[
+  {"ID": 1, "NAME": "agent-node-01", "STATE": 1, "TYPE": 1, "VTAP_GROUP_LCUUID": "group-001", "LCUUID": "agent-001", "LAUNCH_SERVER": "10.0.1.10", "REVISION": "v1.2.0", "BOOT_TIME": 1721400000, "AZ": "zone-a"},
+  {"ID": 2, "NAME": "agent-node-02", "STATE": 1, "TYPE": 1, "VTAP_GROUP_LCUUID": "group-001", "LCUUID": "agent-002", "LAUNCH_SERVER": "10.0.1.11", "REVISION": "v1.2.0", "BOOT_TIME": 1721400000, "AZ": "zone-a"},
+  {"ID": 3, "NAME": "agent-node-03", "STATE": 1, "TYPE": 1, "VTAP_GROUP_LCUUID": "group-001", "LCUUID": "agent-003", "LAUNCH_SERVER": "10.0.2.10", "REVISION": "v1.2.0", "BOOT_TIME": 1721400000, "AZ": "zone-b"}
+]

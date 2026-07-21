@@ -1,0 +1,9 @@
+[
+  {"query_id": "m1", "node_type": "pod_service", "icon_id": -16, "auto_service_id": 1, "auto_service": "api-gateway", "Byte": 89012345, "请求速率": 1200.5, "响应时延": 45.6},
+  {"query_id": "m2", "node_type": "pod_service", "icon_id": -16, "auto_service_id": 2, "auto_service": "user-service", "Byte": 23456789, "请求速率": 89.2, "响应时延": 120.3},
+  {"query_id": "m3", "node_type": "pod_service", "icon_id": -16, "auto_service_id": 3, "auto_service": "order-service", "Byte": 45678901, "请求速率": 234.5, "响应时延": 8.2},
+  {"query_id": "m4", "node_type": "pod_service", "icon_id": -16, "auto_service_id": 4, "auto_service": "redis-cache", "Byte": 12345678, "请求速率": 567.1, "响应时延": 2.1},
+  {"query_id": "m5", "node_type": "pod_service", "icon_id": -16, "auto_service_id": 5, "auto_service": "mysql-db", "Byte": 67890123, "请求速率": 312.8, "响应时延": 15.7},
+  {"query_id": "m6", "node_type": "pod_service", "icon_id": -16, "auto_service_id": 6, "auto_service": "payment-service", "Byte": 5678901, "请求速率": 45.3, "响应时延": 890.5},
+  {"query_id": "m7", "node_type": "pod_service", "icon_id": -16, "auto_service_id": 7, "auto_service": "notification-service", "Byte": 3456789, "请求速率": 78.9, "响应时延": 5.3}
+]

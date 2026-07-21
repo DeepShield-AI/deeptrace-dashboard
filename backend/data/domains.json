@@ -1,0 +1,3 @@
+[
+  {"ID": 1, "NAME": "k8s-prod", "TYPE": 1, "STATE": 1, "CONTROLLER_IP": "10.0.0.1", "LCUUID": "domain-001", "ICON_ID": -3}
+]

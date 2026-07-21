@@ -1,0 +1,9 @@
+[
+  {"ID": 1, "NAME": "api-gateway", "ALIAS": "", "TYPE": 1, "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "LCUUID": "svc-001", "DOMAIN": "k8s-prod"},
+  {"ID": 2, "NAME": "user-service", "ALIAS": "", "TYPE": 1, "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "LCUUID": "svc-002", "DOMAIN": "k8s-prod"},
+  {"ID": 3, "NAME": "order-service", "ALIAS": "", "TYPE": 1, "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "LCUUID": "svc-003", "DOMAIN": "k8s-prod"},
+  {"ID": 4, "NAME": "redis-cache", "ALIAS": "", "TYPE": 1, "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "middleware", "LCUUID": "svc-004", "DOMAIN": "k8s-prod"},
+  {"ID": 5, "NAME": "mysql-db", "ALIAS": "", "TYPE": 1, "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "middleware", "LCUUID": "svc-005", "DOMAIN": "k8s-prod"},
+  {"ID": 6, "NAME": "payment-service", "ALIAS": "", "TYPE": 1, "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "LCUUID": "svc-006", "DOMAIN": "k8s-prod"},
+  {"ID": 7, "NAME": "notification-service", "ALIAS": "", "TYPE": 1, "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "LCUUID": "svc-007", "DOMAIN": "k8s-prod"}
+]

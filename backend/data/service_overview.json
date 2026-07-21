@@ -1,0 +1,20 @@
+{
+  "overviewTrend": [
+    {"time": 1721500000, "request_rate": 1200, "error_ratio": 0.02, "response_delay": 45.6},
+    {"time": 1721500060, "request_rate": 1150, "error_ratio": 0.01, "response_delay": 42.1},
+    {"time": 1721500120, "request_rate": 1300, "error_ratio": 0.03, "response_delay": 48.9},
+    {"time": 1721500180, "request_rate": 1100, "error_ratio": 0.01, "response_delay": 40.2},
+    {"time": 1721500240, "request_rate": 1250, "error_ratio": 0.02, "response_delay": 44.5},
+    {"time": 1721500300, "request_rate": 1350, "error_ratio": 0.04, "response_delay": 52.3},
+    {"time": 1721500360, "request_rate": 1180, "error_ratio": 0.01, "response_delay": 41.8}
+  ],
+  "overviewList": [
+    {"name": "api-gateway", "request_rate": 1200, "error_ratio": 0.02, "response_delay": 45.6, "type": "HTTP"},
+    {"name": "user-service", "request_rate": 89.2, "error_ratio": 0.01, "response_delay": 120.3, "type": "HTTP"},
+    {"name": "order-service", "request_rate": 234.5, "error_ratio": 0.005, "response_delay": 8.2, "type": "gRPC"},
+    {"name": "redis-cache", "request_rate": 567.1, "error_ratio": 0.0, "response_delay": 2.1, "type": "Redis"},
+    {"name": "mysql-db", "request_rate": 312.8, "error_ratio": 0.001, "response_delay": 15.7, "type": "MySQL"},
+    {"name": "payment-service", "request_rate": 45.3, "error_ratio": 0.08, "response_delay": 890.5, "type": "HTTP"},
+    {"name": "notification-service", "request_rate": 78.9, "error_ratio": 0.0, "response_delay": 5.3, "type": "HTTP"}
+  ]
+}

@@ -1,0 +1,10 @@
+[
+  {"ID": 1, "NAME": "api-gateway-7d4f8b6c5-x9k2m", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "POD_GROUP_ID": 1, "POD_NODE_ID": 1, "STATE": 1, "LCUUID": "pod-001"},
+  {"ID": 2, "NAME": "api-gateway-7d4f8b6c5-p3n8w", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "POD_GROUP_ID": 1, "POD_NODE_ID": 2, "STATE": 1, "LCUUID": "pod-002"},
+  {"ID": 3, "NAME": "user-service-5c9d7e8f4-k2j5t", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "POD_GROUP_ID": 2, "POD_NODE_ID": 1, "STATE": 1, "LCUUID": "pod-003"},
+  {"ID": 4, "NAME": "order-service-8b3c6d9e2-m7r4q", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "POD_GROUP_ID": 3, "POD_NODE_ID": 2, "STATE": 1, "LCUUID": "pod-004"},
+  {"ID": 5, "NAME": "redis-cache-0", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "middleware", "POD_GROUP_ID": 4, "POD_NODE_ID": 1, "STATE": 1, "LCUUID": "pod-005"},
+  {"ID": 6, "NAME": "mysql-db-0", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "middleware", "POD_GROUP_ID": 5, "POD_NODE_ID": 2, "STATE": 1, "LCUUID": "pod-006"},
+  {"ID": 7, "NAME": "payment-service-4a2b9c7d1-n5w8x", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "POD_GROUP_ID": 6, "POD_NODE_ID": 1, "STATE": 1, "LCUUID": "pod-007"},
+  {"ID": 8, "NAME": "notification-service-6e5f3c8d0-j2h9p", "POD_CLUSTER_ID": 1, "POD_NAMESPACE": "production", "POD_GROUP_ID": 7, "POD_NODE_ID": 2, "STATE": 1, "LCUUID": "pod-008"}
+]
