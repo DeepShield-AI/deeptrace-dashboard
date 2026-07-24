@@ -1,1 +1,26 @@
-{"method":"GET","path":"/api/df-web/v1/dashboard/114","requestBody":null,"status":200,"headers":{"date":"Tue, 21 Jul 2026 10:08:05 GMT","content-type":"application/json","content-length":"762","x-ratelimit-limit":"1000","x-ratelimit-remaining":"986","crypto":"false","expired-time":"0","x-org-id":"4","x-short-refresh-token-key":"5c83dffeb5cc89db6cc70093a52ca899","x-request-id":"0be57ae918935e97a45473adac276edd","strict-transport-security":"max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains","x-xss-protection":"1; mode=block, 1; mode=block","x-content-type-options":"nosniff, nosniff","access-control-allow-origin":"*","access-control-allow-credentials":"true"},"responseBody":"eyJPUFRfU1RBVFVTIjogIlNVQ0NFU1MiLCAiREFUQSI6IHsiSUQiOiAxMTQsICJURU1QTEFURV9JRCI6IDAsICJUWVBFIjogMCwgIkNPTk5FQ1RfRkxBRyI6IDAsICJOQU1FIjogInp5LXRlc3QiLCAiVEFHUyI6ICJbXSIsICJUSU1FX1JBTkdFIjogIiIsICJBQ1RJVkVfTkFNRSI6ICJbXCI1YmJjMjNjMy03OWJmLTQyMzUtYWNlYS0wYTE5MjI4Zjk2ZTdcIl0iLCAiQVRUUklCVVRFIjogIlt7XCJ4XCI6IDAsIFwieVwiOiAwLCBcIndcIjogMjQsIFwiaFwiOiA2LCBcImlcIjogXCI4NTAzMjRlNS03OWQxLTRkMzgtOTcxMy0zNzdjNDJlZjAyMzlcIiwgXCJ0eXBlXCI6IFwiY2hhcnRcIiwgXCJtb3ZlZFwiOiBmYWxzZX0sIHtcInhcIjogNSwgXCJ5XCI6IDYsIFwid1wiOiAxMiwgXCJoXCI6IDYsIFwiaVwiOiBcImI2YzI0ZWQ0LTU2ZGMtNGZlNS05NTg1LTJiOTRjNWQyMTNmZFwiLCBcInR5cGVcIjogXCJjaGFydFwiLCBcIm1vdmVkXCI6IGZhbHNlfV0iLCAiU1RBUiI6IDAsICJTSEFSRV9TVEFSIjogIiIsICJMQ1VVSUQiOiAiN2MwOGE2YWYtYmQ4OC00OTdlLTkzOWMtYzBjNDdlOTE2YjhkIiwgIlNIT1JUX1VVSUQiOiAiMDFXRnRiTG9aWSIsICJERVNDUklQVElPTiI6ICIiLCAiUkVHSU9OIjogbnVsbCwgIkNSRUFURURfQVQiOiAiMjAyNi0wNy0wMyAwOTo1OTozMyIsICJVUERBVEVEX0FUIjogIjIwMjYtMDctMDYgMTY6MDA6NDUiLCAiVEVBTV9JRCI6IDEsICJBQ0NFU1NfQUNUSU9OUyI6IFsicmVhZCJdfSwgIkRFU0NSSVBUSU9OIjogIiJ9","responseIsBase64":true,"timestamp":"2026-07-21T10:08:05.825Z"}
+{
+  "method": "GET",
+  "path": "/api/df-web/v1/dashboard/114",
+  "requestBody": null,
+  "status": 200,
+  "headers": {
+    "date": "Tue, 21 Jul 2026 10:08:05 GMT",
+    "content-type": "application/json",
+    "content-length": "762",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "986",
+    "crypto": "false",
+    "expired-time": "0",
+    "x-org-id": "4",
+    "x-short-refresh-token-key": "5c83dffeb5cc89db6cc70093a52ca899",
+    "x-request-id": "0be57ae918935e97a45473adac276edd",
+    "strict-transport-security": "max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains",
+    "x-xss-protection": "1; mode=block, 1; mode=block",
+    "x-content-type-options": "nosniff, nosniff",
+    "access-control-allow-origin": "*",
+    "access-control-allow-credentials": "true"
+  },
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"DATA\": {\"ID\": 114, \"TEMPLATE_ID\": 0, \"TYPE\": 0, \"CONNECT_FLAG\": 0, \"NAME\": \"zy-test\", \"TAGS\": \"[]\", \"TIME_RANGE\": \"\", \"ACTIVE_NAME\": \"[\\\"5bbc23c3-79bf-4235-acea-0a19228f96e7\\\"]\", \"ATTRIBUTE\": \"[{\\\"x\\\": 0, \\\"y\\\": 0, \\\"w\\\": 24, \\\"h\\\": 6, \\\"i\\\": \\\"850324e5-79d1-4d38-9713-377c42ef0239\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}, {\\\"x\\\": 5, \\\"y\\\": 6, \\\"w\\\": 12, \\\"h\\\": 6, \\\"i\\\": \\\"b6c24ed4-56dc-4fe5-9585-2b94c5d213fd\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}]\", \"STAR\": 0, \"SHARE_STAR\": \"\", \"LCUUID\": \"7c08a6af-bd88-497e-939c-c0c47e916b8d\", \"SHORT_UUID\": \"01WFtbLoZY\", \"DESCRIPTION\": \"\", \"REGION\": null, \"CREATED_AT\": \"2026-07-03 09:59:33\", \"UPDATED_AT\": \"2026-07-06 16:00:45\", \"TEAM_ID\": 1, \"ACCESS_ACTIONS\": [\"read\"]}, \"DESCRIPTION\": \"\"}",
+  "responseIsBase64": false,
+  "timestamp": "2026-07-21T10:08:05.825Z"
+}

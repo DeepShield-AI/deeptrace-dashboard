@@ -1,1 +1,27 @@
-{"method":"GET","path":"/api/report/v1/deepflow/report-policies/","requestBody":null,"status":200,"headers":{"date":"Tue, 21 Jul 2026 09:54:45 GMT","content-type":"text/html; charset=utf-8","content-length":"1154","vary":"Accept-Encoding","x-ratelimit-limit":"1000","x-ratelimit-remaining":"922","crypto":"false","expired-time":"0","x-org-id":"4","x-short-refresh-token-key":"3218fdde842f2f866c42ca5052c980e7","x-request-id":"08cfcb1aea0e4fc738c854496897d9f9","strict-transport-security":"max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains","x-xss-protection":"1; mode=block, 1; mode=block","x-content-type-options":"nosniff, nosniff","access-control-allow-origin":"*","access-control-allow-credentials":"true"},"responseBody":"eyJPUFRfU1RBVFVTIjogIlNVQ0NFU1MiLCAiV0FJVF9DQUxMQkFDSyI6IGZhbHNlLCAiVEFTSyI6IG51bGwsICJERVNDUklQVElPTiI6ICIiLCAiVFlQRSI6ICJkaWN0IiwgIkRBVEEiOiBbeyJJRCI6IDIsICJOQU1FIjogInRlc3QiLCAiVklFV19JRCI6IDYwLCAiREFUQV9MRVZFTCI6ICIxbSIsICJSRVBPUlRfVFlQRSI6IDAsICJSRVBPUlRfRk9STUFUIjogMSwgIklOVEVSVkFMX1RJTUUiOiBudWxsLCAiVVNFUl9JRCI6IDMzOTgsICJTVEFURSI6IDEsICJQVVNIX1RZUEUiOiAxLCAiUFVTSF9FTUFJTCI6IFsiemhhbmd3eWZ1ZnVAZ21haWwuY29tIl0sICJDUkVBVEVEX0FUIjogIjIwMjYtMDMtMDMgMTY6NDA6NTQiLCAiVVBEQVRFRF9BVCI6ICIyMDI2LTAzLTAzIDE2OjQwOjU0IiwgIkJFR0lOX0FUIjogIjIwMjYtMDMtMDMgMTY6NDA6NTQiLCAiTENVVUlEIjogIjE3YWQyZTBkLWVkY2EtNGI4ZC05ZmY5LTEwMjQ3N2NmMzdmYyIsICJSRVBPUlRfQ09VTlQiOiAxMzYsICJURUFNX0lORk8iOiB7ImN1cnJlbnRfcm9sZSI6IDQsICJuYW1lIjogIlNhbmRib3giLCAidGVhbV9pZCI6IDF9LCAiVEVBTV9JRCI6IDEsICJPV05FUl9VU0VSX0lORk8iOiB7IklEIjogMzM5OCwgIlVTRVJOQU1FIjogIlx1NWYyMFx1NWE0OVx1ODNiOSIsICJDT01QQU5ZIjogIlx1NTMxN1x1NGVhY1x1NGU5MVx1Njc0OVx1NGUxNlx1N2VhYVx1N2Y1MVx1N2VkY1x1NzlkMVx1NjI4MFx1NjcwOVx1OTY1MFx1NTE2Y1x1NTNmOC1cdTUxNzZcdTRlZDYiLCAiUEhPTkVfTlVNIjogIjE3NjAwNzA2ODAzIiwgIkVNQUlMIjogIndhbnlpbmdAeXVuc2hhbi5uZXQiLCAiU1RBVEUiOiAxLCAiVVNFUl9UWVBFIjogMiwgIkFVVEhfVFlQRSI6IDEsICJVU0VSVVVJRCI6ICI3MTc5NWRhOS1jZTk5LTRiZjgtOTI5Ni1kOGQ4NDgzYWRkMDciLCAiREVQQVJUTUVOVCI6ICIiLCAiU1VCX0RFUEFSVE1FTlQiOiAiIiwgIkVNUExPWUVFX0lEIjogIiIsICJDUkVBVEVEX0FUIjogIjIwMjYtMDEtMTYgMTM6MzU6MjciLCAiREVMRVRFRCI6IDAsICJPUkdTIjogW3siSUQiOiA0LCAiTkFNRSI6ICJTYW5kYm94In1dLCAiVEVBTVMiOiBbeyJPUkdfSUQiOiA0LCAiSUQiOiAxLCAiTkFNRSI6ICJTYW5kYm94In1dfSwgIlVTRVJfRU1BSUwiOiAid2FueWluZ0B5dW5zaGFuLm5ldCJ9XX0=","responseIsBase64":true,"timestamp":"2026-07-21T09:54:45.949Z"}
+{
+  "method": "GET",
+  "path": "/api/report/v1/deepflow/report-policies/",
+  "requestBody": null,
+  "status": 200,
+  "headers": {
+    "date": "Tue, 21 Jul 2026 09:54:45 GMT",
+    "content-type": "text/html; charset=utf-8",
+    "content-length": "1154",
+    "vary": "Accept-Encoding",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "922",
+    "crypto": "false",
+    "expired-time": "0",
+    "x-org-id": "4",
+    "x-short-refresh-token-key": "3218fdde842f2f866c42ca5052c980e7",
+    "x-request-id": "08cfcb1aea0e4fc738c854496897d9f9",
+    "strict-transport-security": "max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains",
+    "x-xss-protection": "1; mode=block, 1; mode=block",
+    "x-content-type-options": "nosniff, nosniff",
+    "access-control-allow-origin": "*",
+    "access-control-allow-credentials": "true"
+  },
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"WAIT_CALLBACK\": false, \"TASK\": null, \"DESCRIPTION\": \"\", \"TYPE\": \"dict\", \"DATA\": [{\"ID\": 2, \"NAME\": \"test\", \"VIEW_ID\": 60, \"DATA_LEVEL\": \"1m\", \"REPORT_TYPE\": 0, \"REPORT_FORMAT\": 1, \"INTERVAL_TIME\": null, \"USER_ID\": 3398, \"STATE\": 1, \"PUSH_TYPE\": 1, \"PUSH_EMAIL\": [\"zhangwyfufu@gmail.com\"], \"CREATED_AT\": \"2026-03-03 16:40:54\", \"UPDATED_AT\": \"2026-03-03 16:40:54\", \"BEGIN_AT\": \"2026-03-03 16:40:54\", \"LCUUID\": \"17ad2e0d-edca-4b8d-9ff9-102477cf37fc\", \"REPORT_COUNT\": 136, \"TEAM_INFO\": {\"current_role\": 4, \"name\": \"Sandbox\", \"team_id\": 1}, \"TEAM_ID\": 1, \"OWNER_USER_INFO\": {\"ID\": 3398, \"USERNAME\": \"张婉莹\", \"COMPANY\": \"北京云杉世纪网络科技有限公司-其他\", \"PHONE_NUM\": \"17600706803\", \"EMAIL\": \"wanying@yunshan.net\", \"STATE\": 1, \"USER_TYPE\": 2, \"AUTH_TYPE\": 1, \"USERUUID\": \"71795da9-ce99-4bf8-9296-d8d8483add07\", \"DEPARTMENT\": \"\", \"SUB_DEPARTMENT\": \"\", \"EMPLOYEE_ID\": \"\", \"CREATED_AT\": \"2026-01-16 13:35:27\", \"DELETED\": 0, \"ORGS\": [{\"ID\": 4, \"NAME\": \"Sandbox\"}], \"TEAMS\": [{\"ORG_ID\": 4, \"ID\": 1, \"NAME\": \"Sandbox\"}]}, \"USER_EMAIL\": \"wanying@yunshan.net\"}]}",
+  "responseIsBase64": false,
+  "timestamp": "2026-07-21T09:54:45.949Z"
+}

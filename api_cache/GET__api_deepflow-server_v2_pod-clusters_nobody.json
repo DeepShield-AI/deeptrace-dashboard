@@ -1,1 +1,26 @@
-{"method":"GET","path":"/api/deepflow-server/v2/pod-clusters","requestBody":null,"status":200,"headers":{"date":"Tue, 21 Jul 2026 10:00:34 GMT","content-type":"application/json","content-length":"1314","x-ratelimit-limit":"1000","x-ratelimit-remaining":"975","crypto":"false","expired-time":"0","x-org-id":"4","x-short-refresh-token-key":"5c83dffeb5cc89db6cc70093a52ca899","x-request-id":"82f2d43699dd05fb2329a6932f0f6b82","strict-transport-security":"max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains","x-xss-protection":"1; mode=block, 1; mode=block","x-content-type-options":"nosniff, nosniff","access-control-allow-origin":"*","access-control-allow-credentials":"true"},"responseBody":"eyJPUFRfU1RBVFVTIjoiU1VDQ0VTUyIsIkRFU0NSSVBUSU9OIjoiIiwiREFUQSI6W3siREVMRVRFRF9BVCI6bnVsbCwiTENVVUlEIjoiN2Q3ZDhlZTItMzU3Ni01MDY5LWJlOGEtZGM1MWZjNTNjOGZhIiwiVUlEIjoicG9kX2NsdXN0ZXItdEJsNGwySEdyQiIsIklEIjo3LCJQT0RfTkFNRVNQQUNFX0NPVU5UIjoyOCwiVVBEQVRFRF9BVCI6IjIwMjYtMDYtMDQgMTQ6MzE6NTkiLCJDTFVTVEVSX05BTUUiOiIiLCJFUENfSUQiOjE1LCJSRUdJT04iOiJmZmZmZmZmZi1mZmZmLWZmZmYtZmZmZi1mZmZmZmZmZmZmZmYiLCJFUENfTkFNRSI6IkRGQ2xvdWQiLCJOT0RFX0NPVU5UIjoyLCJTVUJfRE9NQUlOIjoiN2Q3ZDhlZTItMzU3Ni01MDY5LWJlOGEtZGM1MWZjNTNjOGZhIiwiTkFNRSI6IkRGQy1UMC1TYW5kYm94LW5ldyIsIlBPRF9TRVJWSUNFX0NPVU5UIjoxMzMsIlRFQU1fSUQiOjEsIkNSRUFURURfQVQiOiIyMDI2LTA2LTA0IDE0OjMxOjU5IiwiVkVSU0lPTiI6Ikt1YmVybmV0ZXMgdjEuMzIuMS1hbGl5dW4uMSIsIkFaIjoiNTA3NmQxYzEtMjg2YS01ZmFmLWI1OTktNzEwNWUzNTE4NDk3IiwiUkVHSU9OX05BTUUiOiLpmL/ph4zkupEtQkoiLCJBWl9OQU1FIjoi5Y2O5YyXIDIg5Y+v55So5Yy6SSIsIlBPRF9DT1VOVCI6MzExLCJQT0RfR1JPVVBfQ09VTlQiOjE2MSwiVEVBTV9OQU1FIjoiU2FuZGJveCJ9LHsiSUQiOjgsIkFaX05BTUUiOiLljY7ljJcgMiDlj6/nlKjljLogQSIsIlJFR0lPTl9OQU1FIjoi6Zi/6YeM5LqRLUJKIiwiVkVSU0lPTiI6Ikt1YmVybmV0ZXMgdjEuMjUuMCIsIlNVQl9ET01BSU4iOiJiNTJjNTA5Yi0wNzk2LTVlMGYtYjUwYi02MjhlN2I3MmYxYzYiLCJOT0RFX0NPVU5UIjoxLCJURUFNX0lEIjoxLCJQT0RfU0VSVklDRV9DT1VOVCI6ODgsIlVQREFURURfQVQiOiIyMDI2LTA2LTA0IDE0OjQwOjA0IiwiQ1JFQVRFRF9BVCI6IjIwMjYtMDYtMDQgMTQ6NDA6MDQiLCJOQU1FIjoi5omL5py66ZO26KGMIiwiQ0xVU1RFUl9OQU1FIjoiIiwiRVBDX05BTUUiOiJpbmZyYXN0cnVjdHVyZSIsIkxDVVVJRCI6Ijk3MmQyMTRmLTBmYzAtNTU0YS04OTFmLWJlM2MxZmE1YTgyNyIsIkRFTEVURURfQVQiOm51bGwsIkVQQ19JRCI6MTgsIlRFQU1fTkFNRSI6IlNhbmRib3giLCJBWiI6ImE0YTBjMjNiLWViODQtNTI1NC04MmM4LTE3MjdkOTNiNGY3YSIsIlVJRCI6InBvZF9jbHVzdGVyLUwxQklobk1YbkoiLCJSRUdJT04iOiJmZmZmZmZmZi1mZmZmLWZmZmYtZmZmZi1mZmZmZmZmZmZmZmYiLCJQT0RfTkFNRVNQQUNFX0NPVU5UIjoxNCwiUE9EX0NPVU5UIjoxMDIsIlBPRF9HUk9VUF9DT1VOVCI6MTAwfV19","responseIsBase64":true,"timestamp":"2026-07-21T10:00:34.546Z"}
+{
+  "method": "GET",
+  "path": "/api/deepflow-server/v2/pod-clusters",
+  "requestBody": null,
+  "status": 200,
+  "headers": {
+    "date": "Tue, 21 Jul 2026 10:00:34 GMT",
+    "content-type": "application/json",
+    "content-length": "1314",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "975",
+    "crypto": "false",
+    "expired-time": "0",
+    "x-org-id": "4",
+    "x-short-refresh-token-key": "5c83dffeb5cc89db6cc70093a52ca899",
+    "x-request-id": "82f2d43699dd05fb2329a6932f0f6b82",
+    "strict-transport-security": "max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains",
+    "x-xss-protection": "1; mode=block, 1; mode=block",
+    "x-content-type-options": "nosniff, nosniff",
+    "access-control-allow-origin": "*",
+    "access-control-allow-credentials": "true"
+  },
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"DESCRIPTION\": \"\", \"DATA\": [{\"DELETED_AT\": null, \"LCUUID\": \"7d7d8ee2-3576-5069-be8a-dc51fc53c8fa\", \"UID\": \"pod_cluster-tBl4l2HGrB\", \"ID\": 7, \"POD_NAMESPACE_COUNT\": 28, \"UPDATED_AT\": \"2026-06-04 14:31:59\", \"CLUSTER_NAME\": \"\", \"EPC_ID\": 15, \"REGION\": \"ffffffff-ffff-ffff-ffff-ffffffffffff\", \"EPC_NAME\": \"DFCloud\", \"NODE_COUNT\": 2, \"SUB_DOMAIN\": \"7d7d8ee2-3576-5069-be8a-dc51fc53c8fa\", \"NAME\": \"DFC-T0-Sandbox-new\", \"POD_SERVICE_COUNT\": 133, \"TEAM_ID\": 1, \"CREATED_AT\": \"2026-06-04 14:31:59\", \"VERSION\": \"Kubernetes v1.32.1-aliyun.1\", \"AZ\": \"5076d1c1-286a-5faf-b599-7105e3518497\", \"REGION_NAME\": \"阿里云-BJ\", \"AZ_NAME\": \"华北 2 可用区I\", \"POD_COUNT\": 311, \"POD_GROUP_COUNT\": 161, \"TEAM_NAME\": \"Sandbox\"}, {\"ID\": 8, \"AZ_NAME\": \"华北 2 可用区 A\", \"REGION_NAME\": \"阿里云-BJ\", \"VERSION\": \"Kubernetes v1.25.0\", \"SUB_DOMAIN\": \"b52c509b-0796-5e0f-b50b-628e7b72f1c6\", \"NODE_COUNT\": 1, \"TEAM_ID\": 1, \"POD_SERVICE_COUNT\": 88, \"UPDATED_AT\": \"2026-06-04 14:40:04\", \"CREATED_AT\": \"2026-06-04 14:40:04\", \"NAME\": \"手机银行\", \"CLUSTER_NAME\": \"\", \"EPC_NAME\": \"infrastructure\", \"LCUUID\": \"972d214f-0fc0-554a-891f-be3c1fa5a827\", \"DELETED_AT\": null, \"EPC_ID\": 18, \"TEAM_NAME\": \"Sandbox\", \"AZ\": \"a4a0c23b-eb84-5254-82c8-1727d93b4f7a\", \"UID\": \"pod_cluster-L1BIhnMXnJ\", \"REGION\": \"ffffffff-ffff-ffff-ffff-ffffffffffff\", \"POD_NAMESPACE_COUNT\": 14, \"POD_COUNT\": 102, \"POD_GROUP_COUNT\": 100}]}",
+  "responseIsBase64": false,
+  "timestamp": "2026-07-21T10:00:34.546Z"
+}

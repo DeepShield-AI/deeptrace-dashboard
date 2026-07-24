@@ -1,1 +1,26 @@
-{"method":"GET","path":"/api/df-web/v1/dashboard/81","requestBody":null,"status":200,"headers":{"date":"Tue, 21 Jul 2026 10:08:09 GMT","content-type":"application/json","content-length":"856","x-ratelimit-limit":"1000","x-ratelimit-remaining":"981","crypto":"false","expired-time":"0","x-org-id":"4","x-short-refresh-token-key":"5c83dffeb5cc89db6cc70093a52ca899","x-request-id":"7b4ce277c0eb18dbcb47e5340c39f049","strict-transport-security":"max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains","x-xss-protection":"1; mode=block, 1; mode=block","x-content-type-options":"nosniff, nosniff","access-control-allow-origin":"*","access-control-allow-credentials":"true"},"responseBody":"eyJPUFRfU1RBVFVTIjogIlNVQ0NFU1MiLCAiREFUQSI6IHsiSUQiOiA4MSwgIlRFTVBMQVRFX0lEIjogMCwgIlRZUEUiOiAwLCAiQ09OTkVDVF9GTEFHIjogMCwgIk5BTUUiOiAiMTIzMTIzIiwgIlRBR1MiOiAiW10iLCAiVElNRV9SQU5HRSI6ICIiLCAiQUNUSVZFX05BTUUiOiAiW10iLCAiQVRUUklCVVRFIjogIlt7XCJ4XCI6IDAsIFwieVwiOiAwLCBcIndcIjogMjQsIFwiaFwiOiAxLCBcImlcIjogXCIyODMwYmYyNC1jZjk0LTRkODItOGVmZC1lNjI5YzhlMzc5Y2VcIiwgXCJ0eXBlXCI6IFwiY29sbGFwc2VcIiwgXCJtb3ZlZFwiOiBmYWxzZX0sIHtcInhcIjogMCwgXCJ5XCI6IDE1LCBcIndcIjogMjQsIFwiaFwiOiA2LCBcImlcIjogXCI1YjAyOTMyZC1iNmYyLTQ0OGQtYjA1Mi04YTFjZjU4MTg2MWFcIiwgXCJ0eXBlXCI6IFwiY2hhcnRcIiwgXCJtb3ZlZFwiOiBmYWxzZX0sIHtcInhcIjogMTAsIFwieVwiOiA5LCBcIndcIjogMTIsIFwiaFwiOiA2LCBcImlcIjogXCI3ZWE2NWRmOC0xYTlmLTRlYmEtODUyNC03NjBhOTg0MDk4NjJcIiwgXCJ0eXBlXCI6IFwiY2hhcnRcIiwgXCJtb3ZlZFwiOiBmYWxzZX1dIiwgIlNUQVIiOiAwLCAiU0hBUkVfU1RBUiI6ICIiLCAiTENVVUlEIjogImYwYzllMmJjLWU3YjgtNDA3MC04NDM3LTQ0MTZhMmI5NWZkMSIsICJTSE9SVF9VVUlEIjogIjAxV21Ebm5FdzciLCAiREVTQ1JJUFRJT04iOiAiIiwgIlJFR0lPTiI6IG51bGwsICJDUkVBVEVEX0FUIjogIjIwMjYtMDUtMTIgMTE6MDE6NDIiLCAiVVBEQVRFRF9BVCI6ICIyMDI2LTA2LTE1IDE0OjI0OjMwIiwgIlRFQU1fSUQiOiAxLCAiQUNDRVNTX0FDVElPTlMiOiBbInJlYWQiXX0sICJERVNDUklQVElPTiI6ICIifQ==","responseIsBase64":true,"timestamp":"2026-07-21T10:08:09.108Z"}
+{
+  "method": "GET",
+  "path": "/api/df-web/v1/dashboard/81",
+  "requestBody": null,
+  "status": 200,
+  "headers": {
+    "date": "Tue, 21 Jul 2026 10:08:09 GMT",
+    "content-type": "application/json",
+    "content-length": "856",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "981",
+    "crypto": "false",
+    "expired-time": "0",
+    "x-org-id": "4",
+    "x-short-refresh-token-key": "5c83dffeb5cc89db6cc70093a52ca899",
+    "x-request-id": "7b4ce277c0eb18dbcb47e5340c39f049",
+    "strict-transport-security": "max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains",
+    "x-xss-protection": "1; mode=block, 1; mode=block",
+    "x-content-type-options": "nosniff, nosniff",
+    "access-control-allow-origin": "*",
+    "access-control-allow-credentials": "true"
+  },
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"DATA\": {\"ID\": 81, \"TEMPLATE_ID\": 0, \"TYPE\": 0, \"CONNECT_FLAG\": 0, \"NAME\": \"123123\", \"TAGS\": \"[]\", \"TIME_RANGE\": \"\", \"ACTIVE_NAME\": \"[]\", \"ATTRIBUTE\": \"[{\\\"x\\\": 0, \\\"y\\\": 0, \\\"w\\\": 24, \\\"h\\\": 1, \\\"i\\\": \\\"2830bf24-cf94-4d82-8efd-e629c8e379ce\\\", \\\"type\\\": \\\"collapse\\\", \\\"moved\\\": false}, {\\\"x\\\": 0, \\\"y\\\": 15, \\\"w\\\": 24, \\\"h\\\": 6, \\\"i\\\": \\\"5b02932d-b6f2-448d-b052-8a1cf581861a\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}, {\\\"x\\\": 10, \\\"y\\\": 9, \\\"w\\\": 12, \\\"h\\\": 6, \\\"i\\\": \\\"7ea65df8-1a9f-4eba-8524-760a98409862\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}]\", \"STAR\": 0, \"SHARE_STAR\": \"\", \"LCUUID\": \"f0c9e2bc-e7b8-4070-8437-4416a2b95fd1\", \"SHORT_UUID\": \"01WmDnnEw7\", \"DESCRIPTION\": \"\", \"REGION\": null, \"CREATED_AT\": \"2026-05-12 11:01:42\", \"UPDATED_AT\": \"2026-06-15 14:24:30\", \"TEAM_ID\": 1, \"ACCESS_ACTIONS\": [\"read\"]}, \"DESCRIPTION\": \"\"}",
+  "responseIsBase64": false,
+  "timestamp": "2026-07-21T10:08:09.108Z"
+}

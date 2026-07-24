@@ -1,1 +1,26 @@
-{"method":"GET","path":"/api/df-web/v1/dashboard/102","requestBody":null,"status":200,"headers":{"date":"Tue, 21 Jul 2026 10:08:10 GMT","content-type":"application/json","content-length":"655","x-ratelimit-limit":"1000","x-ratelimit-remaining":"978","crypto":"false","expired-time":"0","x-org-id":"4","x-short-refresh-token-key":"5c83dffeb5cc89db6cc70093a52ca899","x-request-id":"30cf46fb98b77e396878af2f1c76feed","strict-transport-security":"max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains","x-xss-protection":"1; mode=block, 1; mode=block","x-content-type-options":"nosniff, nosniff","access-control-allow-origin":"*","access-control-allow-credentials":"true"},"responseBody":"eyJPUFRfU1RBVFVTIjogIlNVQ0NFU1MiLCAiREFUQSI6IHsiSUQiOiAxMDIsICJURU1QTEFURV9JRCI6IDAsICJUWVBFIjogMCwgIkNPTk5FQ1RfRkxBRyI6IDAsICJOQU1FIjogIlx1OGZkZVx1NjNhNVx1NjU3MCIsICJUQUdTIjogIltdIiwgIlRJTUVfUkFOR0UiOiAiIiwgIkFDVElWRV9OQU1FIjogIltdIiwgIkFUVFJJQlVURSI6ICJbe1wiaVwiOiBcImJjNGU5N2YxLWU5MDctNDU5NC1hYWUzLTRhODM3MzQ3NWYyZVwiLCBcIndcIjogMTIsIFwiaFwiOiA2LCBcInhcIjogMCwgXCJ5XCI6IDZ9LCB7XCJpXCI6IFwiNjUwNWM1NWMtNTI2Mi00ODkwLThjZGUtNGFkMGMyOTY4Y2YzXCIsIFwid1wiOiAxMiwgXCJoXCI6IDYsIFwieFwiOiAwLCBcInlcIjogMH1dIiwgIlNUQVIiOiAwLCAiU0hBUkVfU1RBUiI6ICIiLCAiTENVVUlEIjogImU0NjY0MmQxLWI0MGUtNDRkMy1hMTYzLWEwNDlhOWQyZGJiOSIsICJTSE9SVF9VVUlEIjogIjAxV3lHdE1GemgiLCAiREVTQ1JJUFRJT04iOiAiIiwgIlJFR0lPTiI6IG51bGwsICJDUkVBVEVEX0FUIjogIjIwMjYtMDYtMTQgMTY6NDY6MDYiLCAiVVBEQVRFRF9BVCI6ICIyMDI2LTA2LTE0IDE2OjQ2OjE5IiwgIlRFQU1fSUQiOiAxLCAiQUNDRVNTX0FDVElPTlMiOiBbInJlYWQiXX0sICJERVNDUklQVElPTiI6ICIifQ==","responseIsBase64":true,"timestamp":"2026-07-21T10:08:10.537Z"}
+{
+  "method": "GET",
+  "path": "/api/df-web/v1/dashboard/102",
+  "requestBody": null,
+  "status": 200,
+  "headers": {
+    "date": "Tue, 21 Jul 2026 10:08:10 GMT",
+    "content-type": "application/json",
+    "content-length": "655",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "978",
+    "crypto": "false",
+    "expired-time": "0",
+    "x-org-id": "4",
+    "x-short-refresh-token-key": "5c83dffeb5cc89db6cc70093a52ca899",
+    "x-request-id": "30cf46fb98b77e396878af2f1c76feed",
+    "strict-transport-security": "max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains",
+    "x-xss-protection": "1; mode=block, 1; mode=block",
+    "x-content-type-options": "nosniff, nosniff",
+    "access-control-allow-origin": "*",
+    "access-control-allow-credentials": "true"
+  },
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"DATA\": {\"ID\": 102, \"TEMPLATE_ID\": 0, \"TYPE\": 0, \"CONNECT_FLAG\": 0, \"NAME\": \"连接数\", \"TAGS\": \"[]\", \"TIME_RANGE\": \"\", \"ACTIVE_NAME\": \"[]\", \"ATTRIBUTE\": \"[{\\\"i\\\": \\\"bc4e97f1-e907-4594-aae3-4a8373475f2e\\\", \\\"w\\\": 12, \\\"h\\\": 6, \\\"x\\\": 0, \\\"y\\\": 6}, {\\\"i\\\": \\\"6505c55c-5262-4890-8cde-4ad0c2968cf3\\\", \\\"w\\\": 12, \\\"h\\\": 6, \\\"x\\\": 0, \\\"y\\\": 0}]\", \"STAR\": 0, \"SHARE_STAR\": \"\", \"LCUUID\": \"e46642d1-b40e-44d3-a163-a049a9d2dbb9\", \"SHORT_UUID\": \"01WyGtMFzh\", \"DESCRIPTION\": \"\", \"REGION\": null, \"CREATED_AT\": \"2026-06-14 16:46:06\", \"UPDATED_AT\": \"2026-06-14 16:46:19\", \"TEAM_ID\": 1, \"ACCESS_ACTIONS\": [\"read\"]}, \"DESCRIPTION\": \"\"}",
+  "responseIsBase64": false,
+  "timestamp": "2026-07-21T10:08:10.537Z"
+}

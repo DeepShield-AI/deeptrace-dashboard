@@ -1,1 +1,26 @@
-{"method":"GET","path":"/api/df-web/v1/dashboard/101","requestBody":null,"status":200,"headers":{"date":"Tue, 21 Jul 2026 10:08:10 GMT","content-type":"application/json","content-length":"1313","x-ratelimit-limit":"1000","x-ratelimit-remaining":"977","crypto":"false","expired-time":"0","x-org-id":"4","x-short-refresh-token-key":"5c83dffeb5cc89db6cc70093a52ca899","x-request-id":"c36ef07bf5cca00dc95b4d72fca479d2","strict-transport-security":"max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains","x-xss-protection":"1; mode=block, 1; mode=block","x-content-type-options":"nosniff, nosniff","access-control-allow-origin":"*","access-control-allow-credentials":"true"},"responseBody":"eyJPUFRfU1RBVFVTIjogIlNVQ0NFU1MiLCAiREFUQSI6IHsiSUQiOiAxMDEsICJURU1QTEFURV9JRCI6IDAsICJUWVBFIjogMCwgIkNPTk5FQ1RfRkxBRyI6IDAsICJOQU1FIjogInh4eFx1NTQ3ZFx1NTQwZFx1N2E3YVx1OTVmNFx1NGUxYVx1NTJhMVx1OGJlNlx1NjBjNSIsICJUQUdTIjogIltdIiwgIlRJTUVfUkFOR0UiOiAiIiwgIkFDVElWRV9OQU1FIjogIltcImFhMDFiMDAxLWMwMDEtNDAwMS04MDAxLWQwMDFlMDAxZjAwMVwiLCBcImFhMDJiMDAyLWMwMDItNDAwMi04MDAyLWQwMDJlMDAyZjAwMlwiLCBcImFhMDNiMDAzLWMwMDMtNDAwMy04MDAzLWQwMDNlMDAzZjAwM1wiLCBcImFhMDRiMDA0LWMwMDQtNDAwNC04MDA0LWQwMDRlMDA0ZjAwNFwiXSIsICJBVFRSSUJVVEUiOiAiW3tcInhcIjogMCwgXCJ5XCI6IDYsIFwid1wiOiAyNCwgXCJoXCI6IDQsIFwiaVwiOiBcIjg4OGQ2OTQyLTQ1ZGUtNDRiMS04ZGIxLTMzZWYxYTgzYWMxZlwiLCBcInR5cGVcIjogXCJjaGFydFwiLCBcIm1vdmVkXCI6IGZhbHNlfSwge1wieFwiOiAwLCBcInlcIjogMTAsIFwid1wiOiAxMiwgXCJoXCI6IDEwLCBcImlcIjogXCJmMTUyMGExMy02NTYxLTQ2ODQtYmEwZS1jN2U1NDJjZGY3MGFcIiwgXCJ0eXBlXCI6IFwiY2hhcnRcIiwgXCJtb3ZlZFwiOiBmYWxzZX0sIHtcInhcIjogMTIsIFwieVwiOiAxMCwgXCJ3XCI6IDEyLCBcImhcIjogMTAsIFwiaVwiOiBcIjAyM2YxMzEzLWRiZDgtNDg2Yy04ZDkzLTNhOTY1YmI5ZTk4M1wiLCBcInR5cGVcIjogXCJjaGFydFwiLCBcIm1vdmVkXCI6IGZhbHNlfSwge1wieFwiOiAwLCBcInlcIjogMjAsIFwid1wiOiAyNCwgXCJoXCI6IDYsIFwiaVwiOiBcIjA3Y2E5YTkzLWQ2MzYtNGJiOS1hOGIxLTEyOGE1ZWE4NzJmM1wiLCBcInR5cGVcIjogXCJjaGFydFwiLCBcIm1vdmVkXCI6IGZhbHNlfSwge1wiaVwiOiBcIjZmMjQyYzdmLTgxYzQtNDRiNC1hOTZlLWY3YTlkYjBhNWVjYlwiLCBcIndcIjogMjQsIFwiaFwiOiA2LCBcInhcIjogMCwgXCJ5XCI6IDAsIFwidHlwZVwiOiBcImNoYXJ0XCJ9XSIsICJTVEFSIjogMCwgIlNIQVJFX1NUQVIiOiAiIiwgIkxDVVVJRCI6ICIxOTRkZjhjYi05YmU2LTQ1NzUtYjFhYy0wN2U1YTc5MjM2NzMiLCAiU0hPUlRfVVVJRCI6ICIwMVd2cDVwUW5FIiwgIkRFU0NSSVBUSU9OIjogIiIsICJSRUdJT04iOiAiW10iLCAiQ1JFQVRFRF9BVCI6ICIyMDI2LTA2LTA1IDE1OjM1OjI0IiwgIlVQREFURURfQVQiOiAiMjAyNi0wNi0wNSAxNTozNToyNCIsICJURUFNX0lEIjogMSwgIkFDQ0VTU19BQ1RJT05TIjogWyJyZWFkIl19LCAiREVTQ1JJUFRJT04iOiAiIn0=","responseIsBase64":true,"timestamp":"2026-07-21T10:08:10.939Z"}
+{
+  "method": "GET",
+  "path": "/api/df-web/v1/dashboard/101",
+  "requestBody": null,
+  "status": 200,
+  "headers": {
+    "date": "Tue, 21 Jul 2026 10:08:10 GMT",
+    "content-type": "application/json",
+    "content-length": "1313",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "977",
+    "crypto": "false",
+    "expired-time": "0",
+    "x-org-id": "4",
+    "x-short-refresh-token-key": "5c83dffeb5cc89db6cc70093a52ca899",
+    "x-request-id": "c36ef07bf5cca00dc95b4d72fca479d2",
+    "strict-transport-security": "max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains",
+    "x-xss-protection": "1; mode=block, 1; mode=block",
+    "x-content-type-options": "nosniff, nosniff",
+    "access-control-allow-origin": "*",
+    "access-control-allow-credentials": "true"
+  },
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"DATA\": {\"ID\": 101, \"TEMPLATE_ID\": 0, \"TYPE\": 0, \"CONNECT_FLAG\": 0, \"NAME\": \"xxx命名空间业务详情\", \"TAGS\": \"[]\", \"TIME_RANGE\": \"\", \"ACTIVE_NAME\": \"[\\\"aa01b001-c001-4001-8001-d001e001f001\\\", \\\"aa02b002-c002-4002-8002-d002e002f002\\\", \\\"aa03b003-c003-4003-8003-d003e003f003\\\", \\\"aa04b004-c004-4004-8004-d004e004f004\\\"]\", \"ATTRIBUTE\": \"[{\\\"x\\\": 0, \\\"y\\\": 6, \\\"w\\\": 24, \\\"h\\\": 4, \\\"i\\\": \\\"888d6942-45de-44b1-8db1-33ef1a83ac1f\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}, {\\\"x\\\": 0, \\\"y\\\": 10, \\\"w\\\": 12, \\\"h\\\": 10, \\\"i\\\": \\\"f1520a13-6561-4684-ba0e-c7e542cdf70a\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}, {\\\"x\\\": 12, \\\"y\\\": 10, \\\"w\\\": 12, \\\"h\\\": 10, \\\"i\\\": \\\"023f1313-dbd8-486c-8d93-3a965bb9e983\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}, {\\\"x\\\": 0, \\\"y\\\": 20, \\\"w\\\": 24, \\\"h\\\": 6, \\\"i\\\": \\\"07ca9a93-d636-4bb9-a8b1-128a5ea872f3\\\", \\\"type\\\": \\\"chart\\\", \\\"moved\\\": false}, {\\\"i\\\": \\\"6f242c7f-81c4-44b4-a96e-f7a9db0a5ecb\\\", \\\"w\\\": 24, \\\"h\\\": 6, \\\"x\\\": 0, \\\"y\\\": 0, \\\"type\\\": \\\"chart\\\"}]\", \"STAR\": 0, \"SHARE_STAR\": \"\", \"LCUUID\": \"194df8cb-9be6-4575-b1ac-07e5a7923673\", \"SHORT_UUID\": \"01Wvp5pQnE\", \"DESCRIPTION\": \"\", \"REGION\": \"[]\", \"CREATED_AT\": \"2026-06-05 15:35:24\", \"UPDATED_AT\": \"2026-06-05 15:35:24\", \"TEAM_ID\": 1, \"ACCESS_ACTIONS\": [\"read\"]}, \"DESCRIPTION\": \"\"}",
+  "responseIsBase64": false,
+  "timestamp": "2026-07-21T10:08:10.939Z"
+}

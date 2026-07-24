@@ -1,1 +1,26 @@
-{"method":"GET","path":"/api/deepflow-server/v2/domains/","requestBody":null,"status":200,"headers":{"date":"Tue, 21 Jul 2026 10:00:33 GMT","content-type":"application/json; charset=utf-8","content-length":"1270","x-ratelimit-limit":"1000","x-ratelimit-remaining":"978","crypto":"false","expired-time":"0","x-org-id":"4","x-short-refresh-token-key":"5c83dffeb5cc89db6cc70093a52ca899","x-request-id":"91bddc56cc17ed533f95f11aeac3e279","strict-transport-security":"max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains","x-xss-protection":"1; mode=block, 1; mode=block","x-content-type-options":"nosniff, nosniff","access-control-allow-origin":"*","access-control-allow-credentials":"true"},"responseBody":"eyJPUFRfU1RBVFVTIjoiU1VDQ0VTUyIsIkRFU0NSSVBUSU9OIjoiIiwiREFUQSI6W3siSUQiOiJkLWp0Znpsc1lmdjMiLCJOQU1FIjoi6Zi/6YeM5LqRIiwiRElTUExBWV9OQU1FIjoiZjYxODQ0MmYtMjViYi00NzdmLTk5NGMtNTNmZmUyMDVlZmU3IiwiQ0xVU1RFUl9JRCI6ImQtanRmemxzWWZ2MyIsIlRZUEUiOjksIkVOQUJMRUQiOjEsIlNUQVRFIjo0LCJFWENFUFRJT05TIjpudWxsLCJFUlJPUl9NU0ciOiLlhbHmnIkz5Liq6ZmE5bGe5a655Zmo6ZuG576k5a2Y5Zyo5byC5bi4XG4yMDI2LTA3LTIxIDE3OjU5OjA2IG5vIHZ0YXAgcmVwb3J0IGNsdXN0ZXIgaWQ6IGM2OWNkMjUwMjc2YmQ0ZjRiOGViNmE4ZmQ4MjYyN2E1YVxuMjAyNi0wNy0yMSAxNzo1OTowNiBubyB2dGFwIHJlcG9ydCBjbHVzdGVyIGlkOiBjNGQ4YjM1YTRjMzViNDgyNDk3ZWE1NTllMjI5ODY5MzZcbjIwMjYtMDctMjEgMTc6NTk6MDYgbm8gdnRhcCByZXBvcnQgY2x1c3RlciBpZDogYzg0ZDY2OWE2NDdmNDQyMmZhYjlmYmM4ZDdmMjU1YWU4IiwiQ09OVFJPTExFUl9JUCI6IjEwLjEuMTgzLjE0MiIsIkNPTlRST0xMRVJfTkFNRSI6ImNuLWJlaWppbmcuMTAuMS4xODMuMTQyIiwiVlRBUF9OQU1FIjoiIiwiVlRBUF9DVFJMX0lQIjoiIiwiVlRBUF9DVFJMX01BQyI6IiIsIklDT05fSUQiOjgsIlRFQU1fSUQiOjEsIlVTRVJfSUQiOjEsIks4U19FTkFCTEVEIjoxLCJDT05GSUciOnsiY29udHJvbGxlcl9pcCI6IjEwLjEuMTgzLjE0MiIsImluY2x1ZGVfcmVnaW9ucyI6IuWNjuWMlzLvvIjljJfkuqzvvIks5Lit5Zu96aaZ5rivLOaXpeacrO+8iOS4nOS6rO+8iSIsIm5vZGVfcG9ydF9uYW1lX3JlZ2V4IjoiIiwicmVnaW9uX25hbWUiOiIiLCJyZWdpb25fdXVpZCI6ImZmZmZmZmZmLWZmZmYtZmZmZi1mZmZmLWZmZmZmZmZmZmZmZiIsInNlY3JldF9pZCI6IkxUQUk1dDlEV0Q4WXdzOUxkelhMdDZyMyIsInNlY3JldF9rZXkiOiIqKioqKioiLCJzeW5jX3RpbWVyIjoiIn0sIkFaX0NPVU5UIjoxNSwiUkVHSU9OX0NPVU5UIjoxLCJWTV9DT1VOVCI6MjE2LCJQT0RfQ09VTlQiOjQxMywiUE9EX0NMVVNURVJTIjpbIkRGQy1UMC1TYW5kYm94LW5ldyIsIkRGLURFTU8iLCJERkMtUjAiLCLln7rnoYDorr7mlr0iLCLmiYvmnLrpk7booYwiXSwiQ1JFQVRFRF9BVCI6IjIwMjYtMDYtMDQgMTQ6MTg6MDMiLCJTWU5DRURfQVQiOiIyMDI2LTA3LTIxIDE3OjU5OjQ2IiwiTENVVUlEIjoiYTQwYWM5NjAtYjM4OS01OWM3LTg4ODgtYTdlMjg5ZTIxODkwIiwiRE9NQUlOX0lEIjoyMn1dfQ==","responseIsBase64":true,"timestamp":"2026-07-21T10:00:34.005Z"}
+{
+  "method": "GET",
+  "path": "/api/deepflow-server/v2/domains/",
+  "requestBody": null,
+  "status": 200,
+  "headers": {
+    "date": "Tue, 21 Jul 2026 10:00:33 GMT",
+    "content-type": "application/json; charset=utf-8",
+    "content-length": "1270",
+    "x-ratelimit-limit": "1000",
+    "x-ratelimit-remaining": "978",
+    "crypto": "false",
+    "expired-time": "0",
+    "x-org-id": "4",
+    "x-short-refresh-token-key": "5c83dffeb5cc89db6cc70093a52ca899",
+    "x-request-id": "91bddc56cc17ed533f95f11aeac3e279",
+    "strict-transport-security": "max-age=31536000; includeSubDomains, max-age=31536000; includeSubDomains",
+    "x-xss-protection": "1; mode=block, 1; mode=block",
+    "x-content-type-options": "nosniff, nosniff",
+    "access-control-allow-origin": "*",
+    "access-control-allow-credentials": "true"
+  },
+  "responseBody": "{\"OPT_STATUS\": \"SUCCESS\", \"DESCRIPTION\": \"\", \"DATA\": [{\"ID\": \"d-jtfzlsYfv3\", \"NAME\": \"阿里云\", \"DISPLAY_NAME\": \"f618442f-25bb-477f-994c-53ffe205efe7\", \"CLUSTER_ID\": \"d-jtfzlsYfv3\", \"TYPE\": 9, \"ENABLED\": 1, \"STATE\": 4, \"EXCEPTIONS\": null, \"ERROR_MSG\": \"共有3个附属容器集群存在异常\\n2026-07-21 17:59:06 no vtap report cluster id: c69cd250276bd4f4b8eb6a8fd82627a5a\\n2026-07-21 17:59:06 no vtap report cluster id: c4d8b35a4c35b482497ea559e22986936\\n2026-07-21 17:59:06 no vtap report cluster id: c84d669a647f4422fab9fbc8d7f255ae8\", \"CONTROLLER_IP\": \"10.1.183.142\", \"CONTROLLER_NAME\": \"cn-beijing.10.1.183.142\", \"VTAP_NAME\": \"\", \"VTAP_CTRL_IP\": \"\", \"VTAP_CTRL_MAC\": \"\", \"ICON_ID\": 8, \"TEAM_ID\": 1, \"USER_ID\": 1, \"K8S_ENABLED\": 1, \"CONFIG\": {\"controller_ip\": \"10.1.183.142\", \"include_regions\": \"华北2（北京）,中国香港,日本（东京）\", \"node_port_name_regex\": \"\", \"region_name\": \"\", \"region_uuid\": \"ffffffff-ffff-ffff-ffff-ffffffffffff\", \"secret_id\": \"LTAI5t9DWD8Yws9LdzXLt6r3\", \"secret_key\": \"******\", \"sync_timer\": \"\"}, \"AZ_COUNT\": 15, \"REGION_COUNT\": 1, \"VM_COUNT\": 216, \"POD_COUNT\": 413, \"POD_CLUSTERS\": [\"DFC-T0-Sandbox-new\", \"DF-DEMO\", \"DFC-R0\", \"基础设施\", \"手机银行\"], \"CREATED_AT\": \"2026-06-04 14:18:03\", \"SYNCED_AT\": \"2026-07-21 17:59:46\", \"LCUUID\": \"a40ac960-b389-59c7-8888-a7e289e21890\", \"DOMAIN_ID\": 22}]}",
+  "responseIsBase64": false,
+  "timestamp": "2026-07-21T10:00:34.005Z"
+}
