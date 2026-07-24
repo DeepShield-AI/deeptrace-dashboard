@@ -1,0 +1,792 @@
+package clickhouse
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strings"
+	"time"
+)
+
+// metricExpr holds a parsed metric expression for Top queries.
+type metricExpr struct {
+	key string
+	sql string
+}
+
+// ---------------------------------------------------------------------------
+// Data-returning query methods (no HTTP coupling)
+// ---------------------------------------------------------------------------
+
+// QueryListResult holds the result of a List query.
+type QueryListResult struct {
+	Data   []map[string]interface{}
+	Fields map[string]interface{} // SCHEMAS
+}
+
+// QueryTopResult holds the result of a Top query.
+type QueryTopResult struct {
+	Data   []map[string]interface{}
+	Count  int
+	Fields map[string]interface{}
+}
+
+// QueryFlowLogResult holds the result of a FlowLogDetail query.
+type QueryFlowLogResult struct {
+	Data []map[string]interface{}
+}
+
+// QueryTraceMapResult holds the result of a TraceMap query.
+type QueryTraceMapResult struct {
+	Data         []map[string]interface{}
+	TotalTraces  int
+	CalculatedTraces int
+}
+
+// ---------------------------------------------------------------------------
+// QueryList — returns structured List data from ClickHouse
+// ---------------------------------------------------------------------------
+
+func (s *CHService) QueryList(ctx context.Context, req *QuerierRequest) (*QueryListResult, error) {
+	sql, err := BuildSelectSQL(*req)
+	if err != nil {
+		return nil, fmt.Errorf("build sql: %w", err)
+	}
+	log.Printf("CH List: %s", sql)
+
+	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	rows, err := s.Query(qCtx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	data, err := ScanRows(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scan: %w", err)
+	}
+	if data == nil {
+		data = []map[string]interface{}{}
+	}
+
+	// Build SCHEMAS from first row.
+	schemas := map[string]interface{}{}
+	if len(data) > 0 {
+		for k, v := range data[0] {
+			vt, tp := "String", 0
+			switch v.(type) {
+			case float64:
+				vt, tp = "Float64", 1
+			case float32:
+				vt, tp = "Float64", 1
+			case int, int64, uint64:
+				vt, tp = "UInt64", 1
+			}
+			schemas[k] = map[string]interface{}{
+				"label_type": "", "pre_as": "", "type": tp,
+				"unit": "", "value_type": vt,
+			}
+		}
+	}
+
+	return &QueryListResult{
+		Data:   data,
+		Fields: schemas,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// QueryTop — returns structured TopN data from ClickHouse
+// ---------------------------------------------------------------------------
+
+func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTopResult, error) {
+	db := req.Database
+	table := req.Table
+	if db == "" {
+		db = "flow_log"
+	}
+	if table == "" {
+		table = "l7_flow_log"
+	}
+	resolvedTable := table
+	if !strings.Contains(table, ".") && db == "flow_metrics" {
+		resolvedTable = table + ".1m"
+	}
+	fullTable := fmt.Sprintf("`%s`.`%s`", db, resolvedTable)
+
+	if len(req.Queries) == 0 {
+		return nil, fmt.Errorf("no queries")
+	}
+	q := req.Queries[0]
+	items := ParseSelectList(q.Select)
+
+	var metricExprs []metricExpr
+	isFlowLog := db == "flow_log"
+
+	for _, item := range items {
+		lower := strings.ToLower(item.Expr)
+
+		if strings.HasPrefix(lower, "percentile(") {
+			inner := item.Expr[len("Percentile("):len(item.Expr)-1]
+			commaIdx := strings.LastIndex(inner, ",")
+			if commaIdx > 0 {
+				field := strings.TrimSpace(inner[:commaIdx])
+				pct := strings.TrimSpace(inner[commaIdx+1:])
+				metricExprs = append(metricExprs, metricExpr{
+					item.Key, fmt.Sprintf("quantile(%s)(`%s`)", pct, strings.ReplaceAll(field, "`", "")),
+				})
+			}
+			continue
+		}
+
+		if strings.HasPrefix(lower, "newtag(") ||
+			strings.HasPrefix(lower, "icon_id(") ||
+			strings.HasPrefix(lower, "node_type(") ||
+			strings.HasPrefix(lower, "enum(") {
+			continue
+		}
+
+		if _, err := fmt.Sscanf(item.Expr, "%f", new(float64)); err == nil {
+			continue
+		}
+
+		if IsAggExpr(item.Expr) {
+			sqlExpr := NormalizeExpr(item.Expr)
+			if isFlowLog {
+				cleanExpr := strings.ToLower(strings.ReplaceAll(item.Expr, "`", ""))
+				existsInFlowLog := strings.Contains(cleanExpr, "response_duration") ||
+					strings.Contains(cleanExpr, "response_code") ||
+					strings.Contains(cleanExpr, "response_status") ||
+					strings.Contains(cleanExpr, "request_type") ||
+					strings.Contains(cleanExpr, "request_domain") ||
+					strings.Contains(cleanExpr, "request_resource") ||
+					strings.Contains(cleanExpr, "response_exception") ||
+					strings.Contains(cleanExpr, "response_result")
+				if !existsInFlowLog {
+					sqlExpr = "count(*)"
+				}
+			}
+			metricExprs = append(metricExprs, metricExpr{item.Key, sqlExpr})
+		}
+	}
+
+
+	// Track extra SELECT items (node_type, icon_id, newTag, numeric literals)
+	type extraField struct { expr string; key string }
+	var extraFields []extraField
+	for _, item := range items {
+		lower := strings.ToLower(item.Expr)
+		// Skip metrics
+		isMetric := false
+		for _, me := range metricExprs {
+			if me.key == item.Key { isMetric = true; break }
+		}
+		if isMetric { continue }
+		// Skip tags (they are grouped)
+		isTag := false
+		for _, tc := range q.Tags {
+			cn := tc
+			if idx := strings.LastIndex(strings.ToUpper(tc), " AS "); idx >= 0 {
+				cn = strings.TrimSpace(tc[idx+4:])
+				cn = strings.Trim(cn, "`")
+			}
+			if cn == item.Key { isTag = true; break }
+		}
+		if isTag { continue }
+		extraFields = append(extraFields, extraField{item.Expr, item.Key})
+	}
+	if len(metricExprs) == 0 {
+		return nil, fmt.Errorf("no metric expressions found")
+	}
+
+	var wheres []string
+	if req.TimeStart > 0 {
+		ts := time.Unix(req.TimeStart, 0).In(time.UTC).Format("2006-01-02 15:04:05")
+		wheres = append(wheres, fmt.Sprintf("time >= '%s'", ts))
+	}
+	if req.TimeEnd > 0 {
+		ts := time.Unix(req.TimeEnd, 0).In(time.UTC).Format("2006-01-02 15:04:05")
+		wheres = append(wheres, fmt.Sprintf("time <= '%s'", ts))
+	}
+	if q.Where != "" {
+		cleanWhere := cleanWhereClause(q.Where)
+		if cleanWhere != "" {
+			wheres = append(wheres, cleanWhere)
+		}
+	}
+	whereClause := ""
+	if len(wheres) > 0 {
+		whereClause = " WHERE " + strings.Join(wheres, " AND ")
+	}
+
+	var metricSelects []string
+	for _, m := range metricExprs {
+		metricSelects = append(metricSelects, fmt.Sprintf("%s AS `%s`", m.sql, m.key))
+	}
+
+	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	querySQL := fmt.Sprintf("SELECT %s FROM %s%s LIMIT 1", strings.Join(metricSelects, ", "), fullTable, whereClause)
+	log.Printf("CH Top SQL: %s", querySQL)
+
+	rows, err := s.Query(qCtx, querySQL)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	data, err := ScanRows(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scan: %w", err)
+	}
+
+	topColMap := map[string]string{
+		"auto_service":     "app_service",
+		"auto_instance":    "app_instance",
+		"auto_service_0":   "auto_service_id_0",
+		"auto_service_1":   "auto_service_id_1",
+		"auto_instance_0":  "auto_instance_id_0",
+		"auto_instance_1":  "auto_instance_id_1",
+		"chost":            "l3_device_id",
+		"chost_id":         "l3_device_id",
+		"vpc":              "epc_id",
+		"vpc_id":           "epc_id",
+		"pod_service":      "pod_service_id",
+		"pod_service_id":   "pod_service_id",
+		"pod_group":        "pod_group_id",
+		"pod_group_id":     "pod_group_id",
+		"pod_cluster":      "pod_cluster_id",
+		"pod_cluster_id":   "pod_cluster_id",
+		"pod_ns":           "pod_ns_id",
+		"pod_ns_id":        "pod_ns_id",
+	}
+
+	// flow_log-specific column mappings for DeepFlow field names.
+	flowLogColMap := map[string]string{}
+	if isFlowLog {
+		flowLogColMap = map[string]string{
+			"event_type":    "l7_protocol",
+			"auto_instance": "if(empty(app_instance), toString(auto_instance_id_0), app_instance)",
+			"event_desc":    "request_resource",
+		}
+	}
+
+	// If tags present, do grouped aggregation.
+	var tagCols []string
+	var groupCols []string
+	for _, t := range q.Tags {
+		rawExpr, colName := t, t
+		if idx := strings.LastIndex(strings.ToUpper(t), " AS "); idx >= 0 {
+			rawExpr = strings.TrimSpace(t[:idx])
+			colName = strings.TrimSpace(t[idx+4:])
+			colName = strings.Trim(colName, "`")
+		}
+		if colName == "" {
+			continue
+		}
+		lowerExpr := strings.ToLower(strings.TrimSpace(rawExpr))
+		if strings.HasPrefix(lowerExpr, "node_type(") ||
+			strings.HasPrefix(lowerExpr, "icon_id(") ||
+			strings.HasPrefix(lowerExpr, "newtag(") ||
+			strings.HasPrefix(lowerExpr, "enum(") {
+			continue
+		}
+		if _, err := fmt.Sscanf(rawExpr, "%f", new(float64)); err == nil {
+			continue
+		}
+
+		mappedCol := colName
+		if m, ok := topColMap[colName]; ok {
+			mappedCol = m
+		} else if m2, ok2 := flowLogColMap[colName]; ok2 {
+			mappedCol = m2
+		}
+		tagCols = append(tagCols, fmt.Sprintf("`%s` AS `%s`", mappedCol, colName))
+		groupCols = append(groupCols, fmt.Sprintf("`%s`", mappedCol))
+	}
+
+	if len(tagCols) > 0 {
+		groupSQL := fmt.Sprintf("SELECT %s, %s FROM %s%s GROUP BY %s",
+			strings.Join(metricSelects, ", "), strings.Join(tagCols, ", "),
+			fullTable, whereClause, strings.Join(groupCols, ", "))
+		if req.PageSize > 0 {
+			groupSQL += fmt.Sprintf(" LIMIT %d", req.PageSize)
+		} else {
+			groupSQL += " LIMIT 50"
+		}
+		log.Printf("CH Top grouped SQL: %s", groupSQL)
+
+		rows.Close()
+		gRows, gErr := s.Query(qCtx, groupSQL)
+		if gErr == nil {
+			defer gRows.Close()
+			if gData, gErr2 := ScanRows(gRows); gErr2 == nil {
+				data = gData
+			}
+		}
+	}
+
+	if len(data) == 0 {
+		return &QueryTopResult{Data: []map[string]interface{}{}}, nil
+	}
+
+	var resultRows []map[string]interface{}
+	for _, row := range data {
+		var uidParts []string
+		for _, tc := range q.Tags {
+			cn := tc
+			if idx := strings.LastIndex(strings.ToUpper(tc), " AS "); idx >= 0 {
+				cn = strings.TrimSpace(cn[idx+4:])
+				cn = strings.Trim(cn, "`")
+			}
+			if cn != "" {
+				if v, ok := row[cn]; ok {
+					uidParts = append(uidParts, fmt.Sprintf("%s=%v", cn, v))
+				}
+			}
+		}
+		uid := "_"
+		if len(uidParts) > 0 {
+			uid = strings.Join(uidParts, ",")
+		}
+
+		resultRow := map[string]interface{}{"_querier_region": "本地", "UID": uid}
+		for _, tc := range q.Tags {
+			cn := tc
+			if idx := strings.LastIndex(strings.ToUpper(tc), " AS "); idx >= 0 {
+				cn = strings.TrimSpace(cn[idx+4:])
+				cn = strings.Trim(cn, "`")
+			}
+			if cn != "" {
+				if v, ok := row[cn]; ok {
+					resultRow[cn] = v
+				}
+			}
+		}
+		for _, m := range metricExprs {
+			if v, ok := row[m.key]; ok {
+				resultRow[m.key] = v
+			}
+		}
+
+		// Per-group history.
+		histWheres := make([]string, len(wheres))
+		copy(histWheres, wheres)
+		for _, tc := range q.Tags {
+			cn := tc
+			if idx := strings.LastIndex(strings.ToUpper(tc), " AS "); idx >= 0 {
+				cn = strings.TrimSpace(cn[idx+4:])
+				cn = strings.Trim(cn, "`")
+			}
+			if cn != "" {
+				if v, ok := row[cn]; ok {
+					mappedCN := cn
+					if m, ok := topColMap[cn]; ok {
+						mappedCN = m
+					}
+					histWheres = append(histWheres, fmt.Sprintf("`%s` = '%v'", mappedCN, v))
+				}
+			}
+		}
+		histWhere := ""
+		if len(histWheres) > 0 {
+			histWhere = " WHERE " + strings.Join(histWheres, " AND ")
+		}
+		hSQL := fmt.Sprintf("SELECT toUnixTimestamp(toStartOfInterval(time, INTERVAL 1 HOUR)) AS toi, %s FROM %s%s GROUP BY toi ORDER BY toi LIMIT 500",
+			strings.Join(metricSelects, ", "), fullTable, histWhere)
+		histRows, hErr := s.Query(qCtx, hSQL)
+		if hErr == nil {
+			if histData, hErr2 := ScanRows(histRows); hErr2 == nil {
+				resultRow["HISTORY"] = convertHistory(histData, metricExprs)
+			}
+			histRows.Close()
+		}
+		resultRows = append(resultRows, resultRow)
+	}
+
+	// Build SCHEMAS from first data row.
+	schemas := map[string]interface{}{}
+	if len(resultRows) > 0 {
+		for k, v := range resultRows[0] {
+			vt, tp := "String", 0
+			switch v.(type) {
+			case float64:
+				vt, tp = "Float64", 1
+			case float32:
+				vt, tp = "Float64", 1
+			case int, int64, uint64:
+				vt, tp = "UInt64", 1
+			}
+			schemas[k] = map[string]interface{}{
+				"label_type": "", "pre_as": "", "type": tp,
+				"unit": "", "value_type": vt,
+			}
+		}
+	}
+	return &QueryTopResult{
+		Data:   resultRows,
+		Count:  len(resultRows),
+		Fields: schemas,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// QueryFlowLogDetail — returns flow log detail data from ClickHouse
+// ---------------------------------------------------------------------------
+
+func (s *CHService) QueryFlowLogDetail(ctx context.Context, bodyStr string) (*QueryFlowLogResult, error) {
+	var req struct {
+		Database string `json:"DATABASE"`
+		Table    string `json:"TABLE"`
+		Queries  []struct {
+			QueryID string   `json:"QUERY_ID"`
+			Roles   []string `json:"ROLES"`
+			Select  string   `json:"SELECT"`
+		} `json:"QUERIES"`
+		TimeStart int64 `json:"time_start"`
+		TimeEnd   int64 `json:"time_end"`
+	}
+	if err := json.Unmarshal([]byte(bodyStr), &req); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+
+	db := req.Database
+	if db == "" {
+		db = "flow_log"
+	}
+	tbl := req.Table
+	if tbl == "" {
+		tbl = "l7_flow_log"
+	}
+	resolvedTable := tbl
+	if !strings.Contains(tbl, ".") && db == "flow_metrics" {
+		resolvedTable = tbl + ".1m"
+	}
+	fullTable := fmt.Sprintf("`%s`.`%s`", db, resolvedTable)
+
+	colMap := map[string]string{
+		"auto_service_0":     "if(empty(app_service), toString(auto_service_id_0), app_service)",
+		"auto_instance_0":    "if(empty(app_instance), toString(auto_instance_id_0), app_instance)",
+		"auto_service_1":     "if(empty(app_service), toString(auto_service_id_1), app_service)",
+		"auto_instance_1":    "if(empty(app_instance), toString(auto_instance_id_1), app_instance)",
+		"auto_service_id_0":  "auto_service_id_0",
+		"auto_service_id_1":  "auto_service_id_1",
+		"auto_instance_id_0": "auto_instance_id_0",
+		"auto_instance_id_1": "auto_instance_id_1",
+		"protocol":           "l7_protocol",
+		"_id":                "toString(_id)",
+	}
+	// flow_log-specific column mappings.
+	isFlowLogDetail := db == "flow_log"
+	if isFlowLogDetail {
+		colMap["event_type"] = "l7_protocol"
+		colMap["auto_instance"] = "if(empty(app_instance), toString(auto_instance_id_0), app_instance)"
+		colMap["event_desc"] = "request_resource"
+	}
+
+	selectCols := "*"
+	if len(req.Queries) > 0 && req.Queries[0].Select != "" {
+		items := ParseSelectList(req.Queries[0].Select)
+		var cols []string
+		for _, item := range items {
+			lower := strings.ToLower(item.Expr)
+			switch {
+			case strings.HasPrefix(lower, "newtag("):
+				continue
+			case strings.HasPrefix(lower, "enum("):
+				inner := strings.TrimSpace(item.Expr[len("Enum("):len(item.Expr)-1])
+				cols = append(cols, fmt.Sprintf("`%s` AS `%s`", inner, item.Key))
+			case strings.HasPrefix(lower, "icon_id("):
+				cols = append(cols, fmt.Sprintf("toInt64(-13) AS `%s`", item.Key))
+			case strings.HasPrefix(lower, "node_type("):
+				inner := strings.TrimSpace(item.Expr[len("node_type("):len(item.Expr)-1])
+				cols = append(cols, fmt.Sprintf("toString(`%s`) AS `%s`", inner, item.Key))
+			default:
+				col := strings.Trim(item.Expr, "`")
+				if mapped, ok := colMap[col]; ok {
+					cols = append(cols, fmt.Sprintf("%s AS `%s`", mapped, item.Key))
+				} else if col != item.Key {
+					cols = append(cols, fmt.Sprintf("`%s` AS `%s`", col, item.Key))
+				} else {
+					cols = append(cols, fmt.Sprintf("`%s`", col))
+				}
+			}
+		}
+		if len(cols) > 0 {
+			selectCols = strings.Join(cols, ", ")
+		}
+	}
+
+	var wheres []string
+	if req.TimeStart > 0 {
+		ts := time.Unix(req.TimeStart, 0).In(time.UTC).Format("2006-01-02 15:04:05")
+		wheres = append(wheres, fmt.Sprintf("time >= '%s'", ts))
+	}
+	if req.TimeEnd > 0 {
+		ts := time.Unix(req.TimeEnd, 0).In(time.UTC).Format("2006-01-02 15:04:05")
+		wheres = append(wheres, fmt.Sprintf("time <= '%s'", ts))
+	}
+
+	sql := fmt.Sprintf("SELECT %s FROM %s", selectCols, fullTable)
+	if len(wheres) > 0 {
+		sql += " WHERE " + strings.Join(wheres, " AND ")
+	}
+	sql += " LIMIT 500"
+
+	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	rows, err := s.Query(qCtx, sql)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	rawData, err := ScanRows(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scan: %w", err)
+	}
+	if rawData == nil {
+		rawData = []map[string]interface{}{}
+	}
+
+	enumDisplay := map[string]map[string]string{
+		"response_status":  {"0": "正常", "1": "异常", "2": "超时", "3": "服务端异常", "4": "客户端异常", "5": "取消"},
+		"observation_point": {"c": "客户端网卡", "s": "服务端网卡", "c-p": "客户侧网络", "s-p": "服务侧网络", "c-app": "客户端应用", "s-app": "服务端应用", "app": "应用", "rest": "其他"},
+		"l7_protocol":      {"20": "HTTP", "21": "Dubbo", "41": "gRPC", "60": "MySQL", "61": "PostgreSQL", "68": "Redis", "80": "DNS", "100": "TLS", "120": "FastCGI"},
+		"is_tls":           {"0": "否", "1": "是"},
+		"is_async":         {"0": "否", "1": "是"},
+	}
+
+	var processed []map[string]interface{}
+	for _, row := range rawData {
+		row["_querier_region"] = "本地"
+		for k, v := range row {
+			if v == nil {
+				if k == "response_code" {
+					row[k] = 0
+				}
+				if k == "response_exception" {
+					row[k] = ""
+				}
+				continue
+			}
+			strVal := fmt.Sprintf("%v", v)
+
+			if strings.HasPrefix(k, "Enum(") && strings.HasSuffix(k, ")") {
+				innerKey := k[5 : len(k)-1]
+				if emap, ok := enumDisplay[innerKey]; ok {
+					if display, ok2 := emap[strVal]; ok2 {
+						row[k] = display
+					}
+				}
+			}
+			// Convert numeric l7_protocol (event_type mapping) to human-readable name.
+			if k == "event_type" && isFlowLogDetail {
+				if emap, ok := enumDisplay["l7_protocol"]; ok {
+					if display, ok2 := emap[strVal]; ok2 {
+						row[k] = display
+					}
+				}
+			}
+			if k == "_id" {
+				row[k] = strVal
+			}
+			if k == "start_time" || k == "end_time" {
+				switch val := v.(type) {
+				case float64:
+					row[k] = time.UnixMicro(int64(val)).Format("2006-01-02T15:04:05.000000-07:00")
+				case uint64:
+					row[k] = time.UnixMicro(int64(val)).Format("2006-01-02T15:04:05.000000-07:00")
+				case int64:
+					row[k] = time.UnixMicro(val).Format("2006-01-02T15:04:05.000000-07:00")
+				}
+			}
+			if strings.Contains(k, "icon_id") {
+				if fv, ok := v.(float64); ok && fv == 0 {
+					row[k] = float64(-16)
+				}
+			}
+		}
+		processed = append(processed, row)
+	}
+
+	return &QueryFlowLogResult{Data: processed}, nil
+}
+
+// ---------------------------------------------------------------------------
+// QueryTraceMap — returns TraceMap node data from ClickHouse
+// ---------------------------------------------------------------------------
+
+func (s *CHService) QueryTraceMap(ctx context.Context, bodyStr string) (*QueryTraceMapResult, error) {
+	var req struct {
+		TraceID string `json:"trace_id"`
+	}
+	json.Unmarshal([]byte(bodyStr), &req)
+
+	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	var sqlStr string
+	if req.TraceID != "" {
+		sqlStr = `SELECT trace_id, span_id, parent_span_id, app_service, app_instance,
+			response_duration, start_time, end_time, request_type, request_resource,
+			response_code, response_status, l7_protocol, observation_point,
+			auto_service_id_0, auto_service_id_1, x_request_id_0, x_request_id_1
+			FROM flow_log.l7_flow_log
+			WHERE trace_id = ` + quoteCH(req.TraceID) + ` AND span_id != '' AND time >= now() - INTERVAL 7 DAY
+			LIMIT 200`
+	} else {
+		sqlStr = `SELECT trace_id, span_id, parent_span_id, app_service, app_instance,
+			response_duration, start_time, end_time, request_type, request_resource,
+			response_code, response_status, l7_protocol, observation_point,
+			auto_service_id_0, auto_service_id_1, x_request_id_0, x_request_id_1
+			FROM flow_log.l7_flow_log
+			WHERE trace_id != '' AND span_id != '' AND time >= now() - INTERVAL 7 DAY
+			ORDER BY start_time ASC
+			LIMIT 200`
+	}
+
+	log.Printf("CH TraceMap: %s", sqlStr[:min(len(sqlStr), 250)])
+
+	rows, err := s.Query(qCtx, sqlStr)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	allData, err := ScanRows(rows)
+	if err != nil {
+		return nil, fmt.Errorf("scan: %w", err)
+	}
+	if len(allData) == 0 {
+		return &QueryTraceMapResult{}, nil
+	}
+
+	byID := map[string]int{}
+	for i, r := range allData {
+		if sid, ok := r["span_id"].(string); ok {
+			byID[sid] = i
+		}
+	}
+
+	levelOf := make([]int, len(allData))
+	for i, r := range allData {
+		levelOf[i] = 1
+		pid := GetStr(r, "parent_span_id")
+		for pid != "" {
+			if idx, ok := byID[pid]; ok {
+				levelOf[i]++
+				pid = GetStr(allData[idx], "parent_span_id")
+			} else {
+				break
+			}
+		}
+	}
+
+	var nodes []map[string]interface{}
+	for i, r := range allData {
+		svc := GetStr(r, "app_service")
+		if svc == "" {
+			svc = GetStr(r, "app_instance")
+		}
+		if svc == "" {
+			svc = fmt.Sprintf("span-%s", GetStr(r, "span_id"))
+		}
+		svcID := GetF64(r, "auto_service_id_1")
+
+		node := map[string]interface{}{
+			"level":             levelOf[i],
+			"signal_source":     float64(4),
+			"response_code":     r["response_code"],
+			"response_status":   GetF64(r, "response_status"),
+			"auto_service_type": float64(11),
+			"auto_service_id":   svcID,
+			"icon_id":           float64(-16),
+			"ip":                "",
+			"uid":               fmt.Sprintf("self_index=%d,auto_service_id=%v,app_service=%s", i, svcID, svc),
+			"node_type":         "pod_service",
+			"app_service":       svc,
+			"service_uid":       fmt.Sprintf("auto_service_id=%v,app_service=%s", svcID, svc),
+			"auto_service":      svc,
+			"observation_point": GetStr(r, "observation_point"),
+			"parent_node_infos": []interface{}{},
+		}
+
+		pid := GetStr(r, "parent_span_id")
+		if pIdx, ok := byID[pid]; ok && pIdx != i {
+			parent := allData[pIdx]
+			pSvc := GetStr(parent, "app_service")
+			if pSvc == "" {
+				pSvc = GetStr(parent, "app_instance")
+			}
+			if pSvc == "" {
+				pSvc = fmt.Sprintf("span-%s", GetStr(parent, "span_id"))
+			}
+			node["parent_node_infos"] = []interface{}{
+				map[string]interface{}{
+					"pseudo_link":                        0,
+					"parent_index":                       pIdx,
+					"total":                              1,
+					"response_total":                     1,
+					"response_duration_sum":              GetF64(r, "response_duration"),
+					"response_status_server_error_count": 0,
+					"response_success_count":             1,
+					"uniq_parent_span_infos": []interface{}{
+						map[string]interface{}{
+							"signal_source":       float64(4),
+							"auto_service_type_0": float64(11),
+							"auto_service_type_1": float64(11),
+							"auto_service_id_0":   GetF64(parent, "auto_service_id_1"),
+							"auto_service_id_1":   svcID,
+							"client_icon_id":      float64(-16),
+							"server_icon_id":      float64(-16),
+							"observation_point":   GetStr(r, "observation_point"),
+							"ip_0":                "",
+							"ip_1":                "",
+							"app_service_0":       pSvc,
+							"app_service_1":       svc,
+							"auto_service_0":      pSvc,
+							"auto_service_1":      svc,
+							"client_node_type":    "pod_service",
+							"server_node_type":    "pod_service",
+							"endpoints":           []interface{}{GetStr(r, "request_resource")},
+						},
+					},
+				},
+			}
+		}
+		nodes = append(nodes, node)
+	}
+
+	return &QueryTraceMapResult{
+		Data:             nodes,
+		TotalTraces:      1,
+		CalculatedTraces: 1,
+	}, nil
+}
+
+// convertHistory transforms history query data for Top result rows.
+func convertHistory(hist []map[string]interface{}, metrics []metricExpr) []map[string]interface{} {
+	var result []map[string]interface{}
+	for _, row := range hist {
+		entry := map[string]interface{}{}
+		if toi, ok := row["toi"]; ok {
+			entry["toi"] = toi
+		}
+		for _, m := range metrics {
+			if v, ok := row[m.key]; ok {
+				entry[m.key] = v
+			}
+		}
+		result = append(result, entry)
+	}
+	return result
+}
+
+// ensure imported
+var _ = min
