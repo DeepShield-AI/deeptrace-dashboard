@@ -141,7 +141,7 @@ func fallbackEnumMaps() map[string]map[string]string {
 		"status":              {"0": "正常", "1": "异常", "2": "超时"},
 		"role":                {"0": "客户端", "1": "服务端", "2": "内部"},
 		"is_internet":         {"0": "内网", "1": "公网"},
-		"signal_source":       {"0": "OTel", "3": "eBPF", "4": "Prometheus"},
+		"signal_source":       {"0": "Packet", "3": "eBPF", "4": "OTel"},
 		"auto_service_type": {
 			"0": "未知", "1": "虚拟机",
 			"10": "Pod", "11": "Pod Service", "15": "RDS 实例",
