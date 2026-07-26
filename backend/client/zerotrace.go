@@ -63,6 +63,7 @@ func (z *ZerotraceService) Available() bool {
 
 // QueryResult holds the raw result from zerotrace-server query.
 type QueryResult struct {
+	OptStatus string // SUCCESS, PARTIAL_RESULT — from deepflow-server
 	Columns []string
 	Values  [][]interface{}
 	Schemas []ztColumnSchema
@@ -124,11 +125,12 @@ func (z *ZerotraceService) queryRaw(db, sql string) (*QueryResult, error) {
 		return nil, fmt.Errorf("zerotrace parse failed: %w", err)
 	}
 
-	if ztResp.OPT_STATUS != "SUCCESS" || ztResp.Result == nil {
+	if ztResp.OPT_STATUS != "SUCCESS" && ztResp.OPT_STATUS != "PARTIAL_RESULT" || ztResp.Result == nil {
 		return nil, fmt.Errorf("zerotrace query error: %s", ztResp.Description)
 	}
 
 	return &QueryResult{
+		OptStatus: ztResp.OPT_STATUS,
 		Columns: ztResp.Result.Columns,
 		Values:  ztResp.Result.Values,
 		Schemas: ztResp.Result.Schemas,
