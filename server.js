@@ -50,6 +50,17 @@ function proxyRequest(req, res) {
   };
   delete opts.headers['accept-encoding']; // 避免压缩，简化处理
 
+  // Capture request body for logging.
+  let reqBody = '';
+  req.on('data', chunk => { reqBody += chunk; });
+  req.on('end', () => {
+    if (req.method === 'POST' && reqBody) {
+      const pathShort = req.url.substring(0, 60);
+      const bodyShort = reqBody.length > 500 ? reqBody.substring(0, 500) + '...' : reqBody;
+      console.log(`📤 POST ${pathShort} body=${bodyShort}`);
+    }
+  });
+
   const proxyReq = transport.request(opts, (proxyRes) => {
     // 注入 CORS
     const headers = { ...proxyRes.headers };

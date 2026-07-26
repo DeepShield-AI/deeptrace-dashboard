@@ -2,3 +2,12 @@ node_modules/
 .DS_Store
 *.log
 backend/deeptrace-server
+backend/.env.local
+# .claude/
+# CLAUDE.md
+__pycache__/
+*.py[cod]
+temp/
+tools/real_api_capture_*.json
+
+docs/
