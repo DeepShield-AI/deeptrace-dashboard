@@ -13,22 +13,15 @@ func RegisterDashboard(mux *http.ServeMux, deps *Dependencies) {
 }
 
 func handleDashboards(deps *Dependencies) http.HandlerFunc {
-	agg := deps.Aggregator
 	return func(w http.ResponseWriter, r *http.Request) {
 		if checkCache(w, deps, r.Method, r.URL.RequestURI()) {
 			return
 		}
-		data, err := agg.ReadDataFileJSON("dashboards.json")
-		if err != nil {
-			writeSuccess(w, []interface{}{})
-			return
-		}
-		writeSuccess(w, data)
+		writeSuccess(w, []interface{}{})
 	}
 }
 
 func handleBiz(deps *Dependencies) http.HandlerFunc {
-	agg := deps.Aggregator
 	return func(w http.ResponseWriter, r *http.Request) {
 		if strings.TrimSuffix(r.URL.Path, "/") == "/api/df-web/v1/biz" {
 			if checkCache(w, deps, r.Method, "/api/df-web/v1/biz") {
@@ -37,34 +30,10 @@ func handleBiz(deps *Dependencies) http.HandlerFunc {
 			writeSuccess(w, []interface{}{})
 			return
 		}
-
 		if checkCache(w, deps, r.Method, r.URL.RequestURI()) {
 			return
 		}
-
-		// Extract UUID from path: /api/df-web/v1/biz/{uuid}
-		parts := strings.Split(r.URL.Path, "/")
-		uuid := ""
-		for i, p := range parts {
-			if p == "biz" && i+1 < len(parts) {
-				uuid = parts[i+1]
-				break
-			}
-		}
-
-		filename := "dashboard_" + uuid + ".json"
-		data, err := agg.ReadDataFileJSON(filename)
-		if err != nil {
-			data, err = agg.ReadDataFileJSON("dashboard_default.json")
-			if err != nil {
-				writeSuccess(w, map[string]interface{}{
-					"ID": 1, "NAME": "默认仪表盘", "LCUUID": uuid,
-					"JSON_CONFIG": "{}",
-				})
-				return
-			}
-		}
-		writeSuccess(w, data)
+		writeSuccess(w, map[string]interface{}{"ID": 1, "NAME": "默认仪表盘", "JSON_CONFIG": "{}"})
 	}
 }
 

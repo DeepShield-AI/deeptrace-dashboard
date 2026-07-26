@@ -114,38 +114,21 @@ func handleProfile(srv *query.QuerierService) http.HandlerFunc {
 	}
 }
 
-// --------------------------------------------------------------------------
-// Topo
-// --------------------------------------------------------------------------
 
 func handleTopo(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data, err := srv.Aggregator.ReadDataFileJSON("topo.json")
-		if err != nil {
-			writeSuccess(w, map[string]interface{}{
-				"instance_data": []interface{}{},
-				"peers_data":    []interface{}{},
-			})
-			return
-		}
-		writeSuccess(w, data)
+		writeSuccess(w, map[string]interface{}{
+			"instance_data": []interface{}{}, "peers_data": []interface{}{},
+		})
 	}
 }
 
-// --------------------------------------------------------------------------
-// UniversalHistory
-// --------------------------------------------------------------------------
-
 func handleUniversalHistory(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeError(w, "cannot read body", 400)
-			return
-		}
+		body, _ := io.ReadAll(r.Body)
 		var req query.QuerierListRequest
 		if err := json.Unmarshal(body, &req); err != nil {
-			writeError(w, "bad request", 400)
+			writeResult(w, &query.Result{Data: []map[string]interface{}{}})
 			return
 		}
 		result, err := srv.QueryTop(r.Context(), &req)
@@ -156,10 +139,6 @@ func handleUniversalHistory(srv *query.QuerierService) http.HandlerFunc {
 		writeResult(w, result)
 	}
 }
-
-// --------------------------------------------------------------------------
-// UnsupportedTags
-// --------------------------------------------------------------------------
 
 func handleUnsupportedTags(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, []interface{}{})

@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -21,7 +22,6 @@ func handleDBDescription(deps *Dependencies) http.HandlerFunc {
 		body, _ := io.ReadAll(r.Body)
 		bodyStr := string(body)
 		path := r.URL.Path
-		agg := deps.Aggregator
 
 		// 1. Try cache first.
 		if deps.Cache != nil {
@@ -41,7 +41,7 @@ func handleDBDescription(deps *Dependencies) http.HandlerFunc {
 				{"name": "event", "datasources": []string{"perf_event", "alarm_event"}},
 			})
 		case strings.Contains(path, "ShowTables"):
-			data, err := agg.ReadDataFileJSON("tables.json")
+			data, err := []map[string]interface{}{}, fmt.Errorf("no data")
 			if err != nil {
 				writeSuccess(w, []map[string]interface{}{
 					{"name": "vtap_app_port", "datasources": []string{"1m", "1s"}},
@@ -53,7 +53,7 @@ func handleDBDescription(deps *Dependencies) http.HandlerFunc {
 			}
 			writeSuccess(w, data)
 		case strings.Contains(path, "ShowTag"):
-			data, err := agg.ReadDataFileJSON("tags.json")
+			data, err := []map[string]interface{}{}, fmt.Errorf("no data")
 			if err != nil {
 				writeSuccess(w, []map[string]interface{}{
 					{"name": "auto_service", "display_name": "服务", "type": "resource"},
