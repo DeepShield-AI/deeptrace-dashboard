@@ -6,7 +6,6 @@ import (
 	"deeptrace-backend/cache"
 	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
-	"deeptrace-backend/aggregator"
 	"deeptrace-backend/query"
 )
 
@@ -15,7 +14,6 @@ import (
 type Dependencies struct {
 	Cache      *cache.Cache
 	CH         *clickhouse.CHService
-	Aggregator *aggregator.Aggregator
 	Algorithms *client.AlgorithmsService
 	Querier    *query.QuerierService
 	StaticDir  string
