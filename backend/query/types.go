@@ -42,13 +42,14 @@ type ListSort struct {
 
 // QuerierListRequest is the full body of a querier List/Top/FlowLog request.
 type QuerierListRequest struct {
+
 	Database   string             `json:"DATABASE"`
 	Table      string             `json:"TABLE"`
 	PageIndex  int                `json:"PAGE_INDEX"`
 	PageSize   int                `json:"PAGE_SIZE"`
 	Queries    []QuerierListQuery `json:"QUERIES"`
-	TimeStart  int64              `json:"time_start"`
-	TimeEnd    int64              `json:"time_end"`
+	TimeStart  int64              
+	TimeEnd    int64              
 	Sort       *ListSort          `json:"SORT,omitempty"`
 	IncludeHis bool               `json:"INCLUDE_HISTORY"`
 	Top        FlexInt            `json:"TOP"`
@@ -56,6 +57,25 @@ type QuerierListRequest struct {
 	WindowSize int                `json:"window_size"`
 	Fill       string             `json:"fill"`
 	RawBody    json.RawMessage    `json:"-"`
+}
+
+func (r *QuerierListRequest) UnmarshalJSON(b []byte) error {
+	type Alias QuerierListRequest
+	aux := &struct{ *Alias }{Alias: (*Alias)(r)}
+	if err := json.Unmarshal(b, aux); err != nil { return err }
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(b, &raw); err != nil { return nil }
+	if r.TimeStart == 0 {
+		if v, ok := raw["TIME_START"]; ok {
+			json.Unmarshal(v, &r.TimeStart)
+		}
+	}
+	if r.TimeEnd == 0 {
+		if v, ok := raw["TIME_END"]; ok {
+			json.Unmarshal(v, &r.TimeEnd)
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

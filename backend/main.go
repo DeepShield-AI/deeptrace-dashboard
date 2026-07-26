@@ -4,7 +4,6 @@ import (
 	"log"
 	"net/http"
 
-	"deeptrace-backend/aggregator"
 	"deeptrace-backend/cache"
 	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
@@ -29,15 +28,15 @@ func main() {
 
 	// Always available: cache + file-based aggregator.
 	cchCache := cache.New(cfg.CacheDir)
-	agg := aggregator.NewAggregator(cfg.DataDir)
 
 	// Build the DataSource priority chain.
 	chain := query.NewDataSourceChain()
 	ztDS := source.NewZerotraceDataSource(ztSvc)
 	cacheDS := source.NewCacheDataSource(cchCache)
+	chain.AddListSource(ztDS)
+	chain.AddTopSource(ztDS)
 	chain.AddListSource(cacheDS)
 	chain.AddTopSource(cacheDS)
-	chain.AddListSource(ztDS)
 	chain.AddTopSource(ztDS)
 
 	chDS := source.NewCHDataSource(cch)
@@ -48,8 +47,6 @@ func main() {
 	mockDS := source.NewMockDataSource(cfg.DataDir + "/traces.json")
 	chain.AddTraceMapSource(mockDS)
 
-	aggDS := source.NewAggregatorDataSource(agg)
-	chain.AddTraceMapSource(aggDS)
 
 	// Create the query service (central business logic entry point).
 	enumSvc := enum.NewEnumService(cch)
@@ -57,7 +54,6 @@ func main() {
 		Chain:      chain,
 		CH:         cch,
 		Zerotrace:  ztSvc,
-		Aggregator: agg,
 		Enum:       enumSvc,
 	}
 	enumSvc.Init()
@@ -65,7 +61,6 @@ func main() {
 	deps := &transport.Dependencies{
 		Cache:      cchCache,
 		CH:         cch,
-		Aggregator: agg,
 		Algorithms: algoSvc,
 		Querier:    querierSvc,
 		StaticDir:  cfg.StaticDir,
