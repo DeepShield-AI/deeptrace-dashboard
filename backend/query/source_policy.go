@@ -43,8 +43,6 @@ func NormalizeSourceName(name string) string {
 		return "cache"
 	case "mock":
 		return "mock"
-	case "aggregator", "agg":
-		return "aggregator"
 	default:
 		return strings.ToLower(strings.TrimSpace(name))
 	}
@@ -53,7 +51,7 @@ func NormalizeSourceName(name string) string {
 // IsKnownSource reports whether a source can be requested by verification tools.
 func IsKnownSource(name string) bool {
 	switch NormalizeSourceName(name) {
-	case "zerotrace", "clickhouse", "cache", "mock", "aggregator":
+	case "zerotrace", "clickhouse", "cache", "mock":
 		return true
 	default:
 		return false

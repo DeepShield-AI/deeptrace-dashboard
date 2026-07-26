@@ -8,7 +8,7 @@ import (
 
 // QueryList executes a List query through the DataSourceChain with fallbacks.
 func (s *QuerierService) QueryList(ctx context.Context, req *QuerierListRequest) (*Result, error) {
-	// 1. Try DataSourceChain (cache → mock → CH → zerotrace → aggregator).
+	// 1. Try DataSourceChain.
 	if s.Chain != nil {
 		result, err := s.Chain.QueryList(ctx, req)
 		if err == nil && result != nil && len(result.Data) > 0 {
