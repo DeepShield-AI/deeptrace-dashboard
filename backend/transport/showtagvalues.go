@@ -44,16 +44,7 @@ func handleShowTagValues(deps *Dependencies) http.HandlerFunc {
 			req.Table = "l7_flow_log"
 		}
 
-		// 1. Try cache first.
-		if deps.Cache != nil {
-			if cached := deps.Cache.FindWithBody(r.Method, r.URL.RequestURI(), bodyStr); cached != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write(cached)
-				return
-			}
-		}
-
-		// 2. Try ClickHouse direct query.
+		// 1. Try ClickHouse direct query (system.columns.comment → flow_tag → DISTINCT).
 		if data := chQueryShowTagValues(req); data != nil {
 			writeJSON(w, map[string]interface{}{
 				"OPT_STATUS":  "SUCCESS",
@@ -110,7 +101,13 @@ func chQueryShowTagValues(req svRequest) []interface{} {
 		colName = tag
 	}
 
-	return queryDistinctValues(req, colName, req.Like, limitVal(req.Limit))
+	data := queryDistinctValues(req, colName, req.Like, limitVal(req.Limit))
+	// Enrich raw values with display names from int_enum_map,
+	// for tags that have known enum mappings (e.g. signal_source).
+	if data != nil {
+		enrichEnumEntries(data, tag)
+	}
+	return data
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +343,96 @@ func applyLikeToEntries(entries []enumEntry, like, tag string) []enumEntry {
 	}
 
 	return entries
+}
+
+// ---------------------------------------------------------------------------
+// Enum tag handling — query flow_tag.int_enum_map
+// ---------------------------------------------------------------------------
+
+// queryEnumFromFlowTag queries flow_tag.int_enum_map for tag display names and descriptions.
+// enrichEnumEntries enriches raw enum entries with display names from int_enum_map.
+// Only entries whose values exist in the map get updated display_name/description;
+// unrecognized values keep their raw display.
+func enrichEnumEntries(data []interface{}, tag string) {
+	enumTag := tag
+	switch tag {
+	case "signal_source":
+		enumTag = "l7_signal_source"
+	case "protocol":
+		enumTag = "l7_protocol"
+	}
+	q := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.int_enum_map WHERE tag_name='%s'", enumTag)
+	rows, err := chHTTPQuery(q)
+	if err != nil || len(rows) == 0 {
+		return
+	}
+	// Build lookup map: value string → {name_zh, description_zh}.
+	type enumInfo struct{ name, desc string }
+	lookup := make(map[string]enumInfo)
+	for _, row := range rows {
+		key := fmt.Sprintf("%v", row["value"])
+		lookup[key] = enumInfo{
+			name: getSVStr(row, "name_zh"),
+			desc: getSVStr(row, "description_zh"),
+		}
+	}
+	// Enrich each data entry by index to modify in place.
+	for i := range data {
+		if e, ok := data[i].(enumEntry); ok {
+			key := fmt.Sprintf("%v", e.Value)
+			if info, found := lookup[key]; found {
+				data[i] = enumEntry{
+					Value:       e.Value,
+					DisplayName: info.name,
+					Description: info.desc,
+				}
+			}
+		}
+	}
+}
+
+func queryEnumFromFlowTag(tag, like string, limit int) []interface{} {
+	// Map API tag name to int_enum_map tag name.
+	// The enum map stores tags with an optional "l7_" prefix for flow_log columns,
+	// e.g. signal_source → l7_signal_source.
+	enumTag := tag
+	switch tag {
+	case "signal_source":
+		enumTag = "l7_signal_source"
+	case "protocol":
+		enumTag = "l7_protocol"
+	}
+	// Query int_enum_map for known enum values with descriptions.
+	q := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.int_enum_map WHERE tag_name='%s' ORDER BY toUInt64(value)", enumTag)
+	rows, err := chHTTPQuery(q)
+	if err != nil || len(rows) == 0 {
+		return nil
+	}
+
+	entries := make([]enumEntry, 0, len(rows))
+	for _, row := range rows {
+		entries = append(entries, enumEntry{
+			Value:       row["value"],
+			DisplayName: getSVStr(row, "name_zh"),
+			Description: getSVStr(row, "description_zh"),
+		})
+	}
+
+	// Apply LIKE filter.
+	if like != "" {
+		entries = applyLikeToEntries(entries, like, tag)
+	}
+
+	// Apply limit.
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	result := make([]interface{}, len(entries))
+	for i, e := range entries {
+		result[i] = e
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------
