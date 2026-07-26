@@ -23,6 +23,7 @@ type listRequest struct {
 		QueryID string   `json:"QUERY_ID"`
 		Roles   []string `json:"ROLES"`
 		Select  string   `json:"SELECT"`
+		Where   string   `json:"WHERE"`
 	} `json:"QUERIES"`
 	TimeStart int64  `json:"time_start"`
 	TimeEnd   int64  `json:"time_end"`
@@ -115,7 +116,11 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 
 	sb, sd := "", ""
 	if req.Sort != nil { sb, sd = req.Sort.OrderBy, req.Sort.SortedBy }
-	sql := query.BuildBaseSQL(selectCols, tbl, nil, req.TimeStart, req.TimeEnd,
+	extras := []string{}
+	if len(req.Queries) > 0 && req.Queries[0].Where != "" {
+		extras = append(extras, req.Queries[0].Where)
+	}
+	sql := query.BuildBaseSQL(selectCols, tbl, extras, req.TimeStart, req.TimeEnd,
 		"", sb, sd, req.PageSize, 0)
 	if req.PageSize <= 0 { sql += " LIMIT 100" }
 	log.Printf("🔍 ZT FlowLogDetail: db=%s sql=%s", db, sql)
@@ -146,7 +151,7 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	totalCount := 0
 	if req.Total && req.PageIndex <= 1 {
 		totalCount = len(rows.Values)
-		countSQL := query.BuildBaseSQL("Count(row) AS cnt", tbl, nil, req.TimeStart, req.TimeEnd, "", "", "", 0, 0)
+		countSQL := query.BuildBaseSQL("Count(row) AS cnt", tbl, extras, req.TimeStart, req.TimeEnd, "", "", "", 0, 0)
 		countRows, err := zt.QueryRaw(db, countSQL)
 		if err == nil && len(countRows.Values) > 0 && len(countRows.Values[0]) > 0 {
 			switch v := countRows.Values[0][0].(type) {
