@@ -147,7 +147,7 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	// ---------------------------------------------------------------------------
 	// Post-process
 	// ---------------------------------------------------------------------------
-	data := buildData(rows, req.Region)
+	data := BuildData(rows, req.Region)
 
 	for ir, row := range data {
 		for ic, col := range rows.Columns {
@@ -162,7 +162,7 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 			if !ok || val == "" {
 				continue
 			}
-			if zh := enumZHCN(val); zh != "" {
+			if zh := EnumZHCN(val); zh != "" {
 				data[ir][col] = zh
 			}
 		}
@@ -171,7 +171,7 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	// ---------------------------------------------------------------------------
 	// SCHEMAS
 	// ---------------------------------------------------------------------------
-	schemas := buildSchemas(rows, queryID)
+	schemas := BuildSchemas(rows, queryID)
 
 	return &query.Result{
 		Data:   data,

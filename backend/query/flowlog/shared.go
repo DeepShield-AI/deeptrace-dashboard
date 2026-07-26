@@ -9,7 +9,7 @@ import (
 
 // buildData post-processes deepflow-server rows: converts _id to string,
 // handles null fields, adds _querier_region.
-func buildData(rows *client.QueryResult, region string) []map[string]interface{} {
+func BuildData(rows *client.QueryResult, region string) []map[string]interface{} {
 	data := make([]map[string]interface{}, 0, len(rows.Values))
 	for _, row := range rows.Values {
 		r := make(map[string]interface{}, len(rows.Columns)+1)
@@ -65,7 +65,7 @@ func buildData(rows *client.QueryResult, region string) []map[string]interface{}
 }
 
 // buildSchemas constructs the SCHEMAS map from deepflow-server column schemas.
-func buildSchemas(rows *client.QueryResult, queryID string) map[string]interface{} {
+func BuildSchemas(rows *client.QueryResult, queryID string) map[string]interface{} {
 	schemas := map[string]interface{}{}
 	for i, col := range rows.Columns {
 		vt, tp, preAs := "String", 0, ""
@@ -89,7 +89,7 @@ func buildSchemas(rows *client.QueryResult, queryID string) map[string]interface
 }
 
 // enumZHCN translates known English deepflow-server enum display values to Chinese.
-func enumZHCN(val string) string {
+func EnumZHCN(val string) string {
 	switch val {
 	case "No":
 		return "否"

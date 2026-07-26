@@ -113,42 +113,11 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 		}
 	}
 
-	// ---------------------------------------------------------------------------
-	// Build WHERE clause
-	// ---------------------------------------------------------------------------
-	var timeClauses []string
-	if req.TimeStart > 0 {
-		timeClauses = append(timeClauses, fmt.Sprintf("time >= %d", req.TimeStart))
-	}
-	if req.TimeEnd > 0 {
-		timeClauses = append(timeClauses, fmt.Sprintf("time <= %d", req.TimeEnd))
-	}
-
-	whereClause := ""
-	if len(timeClauses) > 0 {
-		whereClause = " WHERE " + strings.Join(timeClauses, " AND ")
-	}
-
-	// ---------------------------------------------------------------------------
-	// ORDER BY
-	// ---------------------------------------------------------------------------
-	orderClause := ""
-	if req.Sort != nil && req.Sort.OrderBy != "" {
-		dir := "ASC"
-		if strings.ToUpper(req.Sort.SortedBy) == "DESC" {
-			dir = "DESC"
-		}
-		orderClause = fmt.Sprintf(" ORDER BY `%s` %s", req.Sort.OrderBy, dir)
-	}
-
-	limit := req.PageSize
-	if limit <= 0 {
-		limit = 100
-	}
-
-	sql := fmt.Sprintf("SELECT %s FROM `%s`%s%s LIMIT %d",
-		selectCols, tbl, whereClause, orderClause, limit)
-
+	sb, sd := "", ""
+	if req.Sort != nil { sb, sd = req.Sort.OrderBy, req.Sort.SortedBy }
+	sql := query.BuildBaseSQL(selectCols, tbl, nil, req.TimeStart, req.TimeEnd,
+		"", sb, sd, req.PageSize, 0)
+	if req.PageSize <= 0 { sql += " LIMIT 100" }
 	log.Printf("🔍 ZT FlowLogDetail: db=%s sql=%s", db, sql)
 
 	// ---------------------------------------------------------------------------
@@ -174,9 +143,10 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	// ---------------------------------------------------------------------------
 	// Total count
 	// ---------------------------------------------------------------------------
-	totalCount := len(rows.Values)
-	if req.Total {
-		countSQL := fmt.Sprintf("SELECT count(*) AS cnt FROM `%s`%s", tbl, whereClause)
+	totalCount := 0
+	if req.Total && req.PageIndex <= 1 {
+		totalCount = len(rows.Values)
+		countSQL := query.BuildBaseSQL("Count(row) AS cnt", tbl, nil, req.TimeStart, req.TimeEnd, "", "", "", 0, 0)
 		countRows, err := zt.QueryRaw(db, countSQL)
 		if err == nil && len(countRows.Values) > 0 && len(countRows.Values[0]) > 0 {
 			switch v := countRows.Values[0][0].(type) {
@@ -191,11 +161,10 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 			}
 		}
 	}
-
 	// ---------------------------------------------------------------------------
 	// Post-process
 	// ---------------------------------------------------------------------------
-	data := buildData(rows, "")
+	data := BuildData(rows, "")
 	for ir, row := range data {
 		for ic, col := range rows.Columns {
 			if ic >= len(rows.Schemas) {
@@ -209,7 +178,7 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 			if !ok || val == "" {
 				continue
 			}
-			if zh := enumZHCN(val); zh != "" {
+			if zh := EnumZHCN(val); zh != "" {
 				data[ir][col] = zh
 			}
 		}
@@ -218,7 +187,7 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	// ---------------------------------------------------------------------------
 	// SCHEMAS
 	// ---------------------------------------------------------------------------
-	schemas := buildSchemas(rows, queryID)
+	schemas := BuildSchemas(rows, queryID)
 
 	return &query.Result{
 		Data:   data,
