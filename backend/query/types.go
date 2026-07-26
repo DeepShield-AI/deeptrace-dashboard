@@ -48,8 +48,8 @@ type QuerierListRequest struct {
 	PageIndex  int                `json:"PAGE_INDEX"`
 	PageSize   int                `json:"PAGE_SIZE"`
 	Queries    []QuerierListQuery `json:"QUERIES"`
-	TimeStart  int64              
-	TimeEnd    int64              
+	TimeStart  int64  `json:"time_start"`
+	TimeEnd    int64  `json:"time_end"`
 	Sort       *ListSort          `json:"SORT,omitempty"`
 	IncludeHis bool               `json:"INCLUDE_HISTORY"`
 	Top        FlexInt            `json:"TOP"`

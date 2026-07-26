@@ -144,44 +144,6 @@ func consolidateHistory(data []map[string]interface{}, sel string, metrics []str
 	return r
 }
 
-func fillHistory(h []map[string]interface{}, mk map[string]bool, timeStart, timeEnd, interval int64) []map[string]interface{} {
-	if interval <= 0 { interval = 1800 }
-	existing := map[int64]bool{}
-	for _, pt := range h {
-		if toi, ok := toFloat64(pt["toi"]); ok {
-			existing[int64(toi)] = true
-		}
-	}
-	fillStart, fillEnd := timeStart, timeEnd
-	for _, pt := range h {
-		if toi, ok := toFloat64(pt["toi"]); ok {
-			t := int64(toi)
-			if t < fillStart { fillStart = t }
-			if t > fillEnd { fillEnd = t }
-		}
-	}
-	// Cap to 200 intervals max
-	maxPts := int64(200) * interval
-	if fillEnd-fillStart > maxPts {
-		fillStart = fillEnd - maxPts
-	}
-	for t := fillEnd - fillEnd%interval; t >= fillStart; t -= interval {
-		if existing[t] { continue }
-		pt := map[string]interface{}{"toi": t}
-		for mk2 := range mk { pt[mk2] = nil }
-		h = append(h, pt)
-	}
-	sort.Slice(h, func(i, j int) bool {
-		ti, _ := toFloat64(h[i]["toi"]); tj, _ := toFloat64(h[j]["toi"])
-		return ti > tj
-	})
-	// Cap total history to 200 points max (prevents chart overload)
-	if len(h) > 200 {
-		h = h[:200]
-	}
-	return h
-}
-
 func parseMetricKeys(sel string, metrics []string) map[string]bool {
 	keys := map[string]bool{}
 	for _, m := range metrics {
@@ -190,7 +152,8 @@ func parseMetricKeys(sel string, metrics []string) map[string]bool {
 	}
 	for _, item := range clickhouse.ParseSelectList(sel) {
 		lower := strings.ToLower(item.Expr)
-		if strings.HasPrefix(lower, "newtag(") || strings.HasPrefix(lower, "enum(") ||
+		if strings.HasPrefix(lower, "newtag(") ||
+
 			strings.HasPrefix(lower, "node_type(") || strings.HasPrefix(lower, "icon_id(") { continue }
 		if strings.Contains(item.Expr, "(") { keys[item.Key] = true }
 	}
@@ -342,4 +305,32 @@ func buildOrder(req *query.QuerierListRequest) string {
 func isNum(expr string) bool {
 	var n float64; _, err := fmt.Sscanf(expr, "%f", &n)
 	return err == nil
+}
+
+func fillHistory(h []map[string]interface{}, mk map[string]bool, timeStart, timeEnd, interval int64) []map[string]interface{} {
+	if interval <= 0 { interval = 1 }
+	existing := map[int64]bool{}
+	for _, pt := range h {
+		if toi, ok := toFloat64(pt["toi"]); ok {
+			existing[int64(toi)] = true
+		}
+	}
+	// Fill from timeEnd - 30*interval down to timeStart
+	fillEnd := timeEnd - timeEnd%interval
+	fillStart := timeStart - timeStart%interval
+	maxPts := int64(30) * interval
+	if fillEnd-fillStart > maxPts {
+		fillStart = fillEnd - maxPts
+	}
+	for t := fillEnd; t >= fillStart; t -= interval {
+		if existing[t] { continue }
+		pt := map[string]interface{}{"toi": t}
+		for mk2 := range mk { pt[mk2] = nil }
+		h = append(h, pt)
+	}
+	sort.Slice(h, func(i, j int) bool {
+		ti, _ := toFloat64(h[i]["toi"]); tj, _ := toFloat64(h[j]["toi"])
+		return ti > tj
+	})
+	return h
 }

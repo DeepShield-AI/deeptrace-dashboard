@@ -32,11 +32,8 @@ func main() {
 	// Build the DataSource priority chain.
 	chain := query.NewDataSourceChain()
 	ztDS := source.NewZerotraceDataSource(ztSvc)
-	cacheDS := source.NewCacheDataSource(cchCache)
 	chain.AddListSource(ztDS)
 	chain.AddTopSource(ztDS)
-	chain.AddListSource(cacheDS)
-	chain.AddTopSource(cacheDS)
 	chain.AddTopSource(ztDS)
 
 	chDS := source.NewCHDataSource(cch)
