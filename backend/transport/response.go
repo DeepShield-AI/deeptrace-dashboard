@@ -33,17 +33,21 @@ func writeError(w http.ResponseWriter, desc string, code int) {
 	})
 }
 
-// writeResult writes a *query.Result using its Envelope() method,
-// ensuring _querier_region is set on every row.
+// writeResult writes a *query.Result using its Envelope() method.
 func writeResult(w http.ResponseWriter, r *query.Result) {
-	if r != nil {
-		for _, row := range r.Data {
-			if _, ok := row["_querier_region"]; !ok {
-				row["_querier_region"] = "本地"
-			}
+	if r == nil {
+		r = &query.Result{Data: []map[string]interface{}{}, OptStatus: "SUCCESS"}
+	}
+	for _, row := range r.Data {
+		if _, ok := row["_querier_region"]; !ok {
+			row["_querier_region"] = "本地"
 		}
 	}
-	writeJSON(w, r.Envelope())
+	w.Header().Set("Content-Type", "application/json")
+	if r.OptStatus == "PARTIAL_RESULT" {
+		w.WriteHeader(http.StatusPartialContent)
+	}
+	json.NewEncoder(w).Encode(r.Envelope())
 }
 
 // writeTraceMap is a convenience wrapper for TraceMapResult responses.
