@@ -52,7 +52,12 @@ func BuildBaseSQL(sel, tbl string, extras []string, timeStart, timeEnd int64,
 		if strings.ToUpper(sortedBy) == "DESC" {
 			dir = "DESC"
 		}
-		fmt.Fprintf(&b, " ORDER BY `%s` %s", orderBy, dir)
+		// Strip surrounding quotes from ORDER BY.
+		// The Statistics internal format sometimes sends single-quoted identifiers,
+		// e.g. ORDER_BY: "'Maxresponse_duration'". Wrapping those in backticks as-is
+		// would produce `` `'Maxresponse_duration'` `` which ZT cannot resolve.
+		cleaned := strings.Trim(orderBy, "'\"`")
+		fmt.Fprintf(&b, " ORDER BY `%s` %s", cleaned, dir)
 	}
 	if limit > 0 {
 		fmt.Fprintf(&b, " LIMIT %d", limit)
