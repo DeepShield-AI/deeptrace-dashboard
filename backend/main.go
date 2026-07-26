@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"deeptrace-backend/cache"
-	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/client"
 	"deeptrace-backend/config"
 	"deeptrace-backend/enum"
 	"deeptrace-backend/query"
@@ -40,18 +40,13 @@ func main() {
 	chain.AddFlowLogSource(chDS)
 	chain.AddTraceMapSource(chDS)
 
-
-	mockDS := source.NewMockDataSource(cfg.DataDir + "/traces.json")
-	chain.AddTraceMapSource(mockDS)
-
-
 	// Create the query service (central business logic entry point).
 	enumSvc := enum.NewEnumService(cch)
 	querierSvc := &query.QuerierService{
-		Chain:      chain,
-		CH:         cch,
-		Zerotrace:  ztSvc,
-		Enum:       enumSvc,
+		Chain:     chain,
+		CH:        cch,
+		Zerotrace: ztSvc,
+		Enum:      enumSvc,
 	}
 	enumSvc.Init()
 
