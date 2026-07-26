@@ -74,9 +74,13 @@ func BuildSchemas(rows *client.QueryResult, queryID string) map[string]interface
 			tp = rows.Schemas[i].Type
 			preAs = rows.Schemas[i].PreAs
 		}
+		unit := ""
+		if i < len(rows.Schemas) {
+			unit = rows.Schemas[i].Unit
+		}
 		schemas[col] = map[string]interface{}{
 			"label_type": "", "pre_as": preAs, "type": tp,
-			"unit": "", "value_type": vt,
+			"unit": unit, "value_type": vt,
 		}
 	}
 	if _, has := schemas["query_id"]; !has && queryID != "" {
