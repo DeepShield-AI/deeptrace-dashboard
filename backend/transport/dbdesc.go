@@ -60,6 +60,11 @@ func handleDBDescription(deps *Dependencies) http.HandlerFunc {
 					{"name": "auto_instance", "display_name": "实例", "type": "resource"},
 					{"name": "ip", "display_name": "IP地址", "type": "resource"},
 					{"name": "protocol", "display_name": "协议", "type": "int_enum"},
+					{"name": "is_internet", "display_name": "网络类型", "type": "int_enum"},
+					{"name": "role", "display_name": "角色", "type": "int_enum"},
+					{"name": "response_status", "display_name": "响应状态", "type": "int_enum"},
+					{"name": "observation_point", "display_name": "观测点", "type": "resource"},
+					{"name": "server_port", "display_name": "服务端端口", "type": "resource"},
 				})
 				return
 			}
