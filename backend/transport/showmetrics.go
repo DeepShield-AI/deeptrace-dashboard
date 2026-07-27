@@ -322,6 +322,19 @@ func queryShowMetricsCH(database, table string) []interface{} {
 		addMetric(m.Name, m.Display, "", true, m.MetricType, m.Category, m.Desc)
 	}
 
+	// Add virtual/computed tags that aren't physical columns but are used by Topo/Top queries.
+	virtualTags := []struct {
+		Name    string
+		Display string
+		Desc    string
+	}{
+		{"role", "角色", "客户端/服务端角色"},
+		{"is_internet", "网络类型", "内网/公网网络类型"},
+	}
+	for _, vt := range virtualTags {
+		addMetric(vt.Name, vt.Display, "", false, 6, "Tag", vt.Desc)
+	}
+
 	if len(metrics) == 0 {
 		return nil
 	}
