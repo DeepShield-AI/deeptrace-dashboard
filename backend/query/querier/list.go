@@ -27,10 +27,17 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	if db == "flow_metrics" && !strings.Contains(tbl, ".") {
 		resolvedTbl = tbl + ".1m"
 	}
+	// If range exceeds 1 day (1440 min), clamp to last day and mark partial.
+	ts := req.TimeStart
+	te := req.TimeEnd
+	isPartial := te-ts > 86400
+	if isPartial {
+		ts = te - 86400
+	}
 	sf, sd := "", ""
 	if req.Sort != nil { sf, sd = req.Sort.OrderBy, req.Sort.SortedBy }
 	sql, _ := buildSQL(req.Queries[0].Select, resolvedTbl, req.Queries[0].Where,
-		req.TimeStart, req.TimeEnd, "", "", 0,
+		ts, te, "", "", 0,
 		req.PageSize, req.PageIndex, req.Interval, sf, sd, false)
 	if sql == "" { return nil, nil }
 	log.Printf("🔍 querier.List: db=%s sql=%s", db, sql)
@@ -45,11 +52,12 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	data := flowlog.BuildData(rows, "")
 	schemas := flowlog.BuildSchemas(rows, qid)
 	fillListExtraFields(req.Queries[0].Select, data)
+	translateEnumResults(data)
 	os := rows.OptStatus
-	if os == "SUCCESS" && req.TimeEnd-req.TimeStart > 3600 { os = "PARTIAL_RESULT" }
+	if isPartial { os = "PARTIAL_RESULT" }
+	if os == "" { os = "SUCCESS" }
 	desc := ""
 	if os == "PARTIAL_RESULT" { desc = "最大可查询时间为 1440 分钟" }
-	if os == "" { os = "SUCCESS" }
 	return &query.Result{Data: data, Type: "Application_Detail_List", Fields: schemas, OptStatus: os, Description: desc}, nil
 }
 
@@ -65,10 +73,17 @@ func QueryTop(zt *client.ZerotraceService, bodyStr string) (*query.Result, error
 	if db == "flow_metrics" && !strings.Contains(tbl, ".") {
 		resolvedTbl = tbl + ".1m"
 	}
+	// If range exceeds 1 day (1440 min), clamp to last day and mark partial.
+	ts := req.TimeStart
+	te := req.TimeEnd
+	isPartial := te-ts > 86400
+	if isPartial {
+		ts = te - 86400
+	}
 	sf, sd := "", ""
 	if req.Sort != nil { sf, sd = req.Sort.OrderBy, req.Sort.SortedBy }
 	sql, hasHist := buildSQL(req.Queries[0].Select, resolvedTbl, req.Queries[0].Where,
-		req.TimeStart, req.TimeEnd, req.Queries[0].GroupBy, req.Queries[0].Select,
+		ts, te, req.Queries[0].GroupBy, req.Queries[0].Select,
 		int(req.Top), req.PageSize, req.PageIndex, req.Interval, sf, sd, true)
 	if sql == "" { return nil, nil }
 	log.Printf("🔍 querier.Top: db=%s sql=%s", db, sql)
@@ -83,15 +98,16 @@ func QueryTop(zt *client.ZerotraceService, bodyStr string) (*query.Result, error
 	data := flowlog.BuildData(rows, "")
 	schemas := flowlog.BuildSchemas(rows, qid)
 	fillTopExtraFields(req.Queries[0].Select, data)
+	translateEnumResults(data)
 	if hasHist {
 		data = consolidateHistory(data, req.Queries[0].Select, req.Queries[0].Metrics,
-			req.TimeStart, req.TimeEnd, int64(req.Interval), req.Fill)
+			ts, te, int64(req.Interval), req.Fill)
 	}
 	fillTopMetaFields(data, req.Queries[0].Select, req.Queries[0].Tags)
 	fillTopSchemas(schemas, req.Queries[0].Select, hasHist, req.Interval)
 	os := rows.OptStatus
 	if os == "" { os = "SUCCESS" }
-	if os == "SUCCESS" && req.TimeEnd-req.TimeStart > 3600 { os = "PARTIAL_RESULT" }
+	if isPartial { os = "PARTIAL_RESULT" }
 	desc := ""
 	if os == "PARTIAL_RESULT" { desc = "最大可查询时间为 1440 分钟" }
 	return &query.Result{Data: data, Type: "Application_Detail_Top", Fields: schemas, OptStatus: os, Description: desc}, nil
@@ -130,6 +146,9 @@ func consolidateHistory(data []map[string]interface{}, sel string, metrics []str
 		for _, row := range g {
 			tv := row["time"]
 			if s, ok := tv.(string); ok { if t, err := parseTime(s); err == nil { tv = t.Unix() } }
+			if toi, ok := toFloat64(tv); ok && interval > 0 {
+				tv = float64(int64(toi) / interval * interval)
+			}
 			pt := map[string]interface{}{"toi": tv}
 			for mk2 := range mk { if v, ok := row[mk2]; ok { pt[mk2] = v } }
 			h = append(h, pt)
@@ -153,7 +172,7 @@ func parseMetricKeys(sel string, metrics []string) map[string]bool {
 	for _, item := range clickhouse.ParseSelectList(sel) {
 		lower := strings.ToLower(item.Expr)
 		if strings.HasPrefix(lower, "newtag(") ||
-
+			strings.HasPrefix(lower, "enum(") ||
 			strings.HasPrefix(lower, "node_type(") || strings.HasPrefix(lower, "icon_id(") { continue }
 		if strings.Contains(item.Expr, "(") { keys[item.Key] = true }
 	}
@@ -263,6 +282,22 @@ func fillTopExtraFields(sel string, data []map[string]interface{}) {
 			var n float64; if _, err := fmt.Sscanf(item.Expr, "%f", &n); err == nil { val = n; fill = true }
 		}
 		if fill { for _, row := range data { if _, exists := row[item.Key]; !exists { row[item.Key] = val } } }
+	}
+}
+
+// translateEnumResults translates Enum() display values from English to Chinese.
+func translateEnumResults(data []map[string]interface{}) {
+	for _, row := range data {
+		for k, v := range row {
+			if !strings.HasPrefix(k, "Enum(") {
+				continue
+			}
+			if s, ok := v.(string); ok {
+				if cn := flowlog.EnumZHCN(s); cn != "" {
+					row[k] = cn
+				}
+			}
+		}
 	}
 }
 

@@ -28,19 +28,23 @@ func buildSQL(sel, tbl, whereCond string, timeStart, timeEnd int64,
 	if isTop {
 		sel = cleanSelect(sel)
 		if groupBy != "" {
-			// HISTORY mode: add time, build GROUP BY with passthrough stripping
-			sel = "`time`, " + sel
+			// HISTORY mode: add time bucket, build GROUP BY with passthrough stripping
+			timeExpr := "`time`"
+			sel = timeExpr + ", " + sel
 			var gbParts []string
 			for _, rc := range stripPassthroughGroupBy(groupBy, origSel) {
 				gbParts = append(gbParts, rc)
 			}
-			gb := "`time`"
+			gb := "time"
 			if len(gbParts) > 0 {
 				gb += ", " + strings.Join(gbParts, ", ")
 			}
 			span := 100
-			if s := int(timeEnd - timeStart); s > 0 {
-				span = s
+			if interval > 0 {
+				span = int((timeEnd - timeStart) / int64(interval))
+			}
+			if span <= 0 {
+				span = 100
 			}
 			return query.BuildBaseSQL(sel, tbl, extras, timeStart, timeEnd,
 				gb, "time", "DESC", span, 0), true
