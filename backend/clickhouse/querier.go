@@ -126,7 +126,11 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	}
 	resolvedTable := table
 	if !strings.Contains(table, ".") && db == "flow_metrics" {
-		resolvedTable = table + ".1m"
+		if req.DataSource != "" {
+			resolvedTable = table + "." + req.DataSource
+		} else {
+			resolvedTable = table + ".1m"
+		}
 	}
 	fullTable := fmt.Sprintf("`%s`.`%s`", db, resolvedTable)
 

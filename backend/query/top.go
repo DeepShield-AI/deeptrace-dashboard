@@ -25,7 +25,6 @@ func (s *QuerierService) QueryTop(ctx context.Context, req *QuerierListRequest) 
 	// 2. Empty fallback.
 	return &Result{
 		Data: []map[string]interface{}{},
-		Type: "Application_Detail_Top",
 	}, nil
 }
 

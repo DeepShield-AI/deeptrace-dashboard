@@ -108,7 +108,7 @@ func (r *Result) Envelope() map[string]interface{} {
 		"DATA":        r.Data,
 		"DESCRIPTION": desc,
 	}
-	if r.Count > 0 || len(r.Data) == 0 {
+	if r.Count > 0 {
 		m["COUNT"] = r.Count
 	}
 	if r.Type != "" {
