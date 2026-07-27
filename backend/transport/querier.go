@@ -391,6 +391,7 @@ func queryTopoFlowMetrics(ch *clickhouse.CHService, req query.QuerierListRequest
 			"auto_service_type_1":     row["auto_service_type_1"],
 			"is_internet_1":           0,
 			"observation_point":       row["observation_point"],
+			"Enum(observation_point)": row["Enum(observation_point)"],
 			"uid_0":                   uid0,
 			"uid_1":                   uid1,
 			"resource_l7_protocol_0":  row["resource_l7_protocol_0"],
@@ -446,6 +447,7 @@ func appendTopoInstanceFm(instances []map[string]interface{}, seen map[string]bo
 	inst := map[string]interface{}{
 		"rs_set_id":           "R1",
 		"observation_point":   obs,
+		"Enum(observation_point)": row["Enum(observation_point)"],
 		"role":                role,
 		"_querier_region":     "本地",
 		"uid":                 uid,
@@ -511,6 +513,7 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 	inst := map[string]interface{}{
 		"rs_set_id":        "R1",
 		"observation_point": obs,
+		"Enum(observation_point)": row["Enum(observation_point)"],
 		"role":              role,
 		"uid":                 uid,
 		"_querier_region":   "本地",
