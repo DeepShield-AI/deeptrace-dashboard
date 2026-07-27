@@ -143,12 +143,16 @@ func consolidateHistory(data []map[string]interface{}, sel string, metrics []str
 		for k, v := range g[0] { if k != "time" { b[k] = v } }
 		sort.Slice(g, func(i, j int) bool { ti, _ := toFloat64(g[i]["time"]); tj, _ := toFloat64(g[j]["time"]); return ti > tj })
 		var h []map[string]interface{}
+		seenTOI := map[int64]bool{}
 		for _, row := range g {
 			tv := row["time"]
 			if s, ok := tv.(string); ok { if t, err := parseTime(s); err == nil { tv = t.Unix() } }
 			if toi, ok := toFloat64(tv); ok && interval > 0 {
 				tv = float64(int64(toi) / interval * interval)
 			}
+			toiKey := int64(toFloat64OrZero(tv))
+			if seenTOI[toiKey] { continue }
+			seenTOI[toiKey] = true
 			pt := map[string]interface{}{"toi": tv}
 			for mk2 := range mk { if v, ok := row[mk2]; ok { pt[mk2] = v } }
 			h = append(h, pt)
@@ -182,6 +186,12 @@ func parseMetricKeys(sel string, metrics []string) map[string]bool {
 func toFloat64(v interface{}) (float64, bool) {
 	switch n := v.(type) { case float64: return n, true; case int64: return float64(n), true; case json.Number: if f, err := n.Float64(); err == nil { return f, true } }
 	return 0, false
+}
+
+func toFloat64OrZero(v interface{}) float64 {
+	f, ok := toFloat64(v)
+	if !ok { return 0 }
+	return f
 }
 
 func fillTopMetaFields(data []map[string]interface{}, sel string, tags []string) {
