@@ -498,9 +498,10 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 
 	// Build a unique key from (auto_service_id_suffix, observation_point, is_internet_suffix)
 	svcID := getStrVal(row, "auto_service_id"+suffix)
+	svcName := getStrVal(row, "auto_service"+suffix)
 	obs := getStrVal(row, "observation_point")
 	isNet := getStrVal(row, "is_internet"+suffix)
-	key := svcID + "|" + obs + "|" + isNet + "|" + role
+	key := svcID + "|" + obs + "|" + isNet + "|" + role + "|" + svcName
 	if seen[key] {
 		return instances
 	}
@@ -531,7 +532,7 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 		"is_internet":       row["is_internet"+suffix],
 		"node_type":         row[nodeTypeKey],
 		"icon_id":           row[iconIDKey],
-		"resource_l7_protocol": nil,
+		"resource_l7_protocol": row["resource_l7_protocol" + suffix],
 	}
 
 	// Copy metric fields from the row.
