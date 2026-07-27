@@ -41,6 +41,7 @@ func RegisterAll(mux *http.ServeMux, deps *Dependencies) {
 	RegisterTracing(mux, deps.Algorithms)
 
 	// Fallback for unhandled /api/ paths.
+	RegisterDimensionResources(mux, deps)
 	RegisterFallback(mux, deps)
 
 	// Static file serving (must be last, catches "/").
