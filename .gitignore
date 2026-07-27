@@ -12,3 +12,4 @@ tools/real_api_capture_*.json
 
 docs/
 backend/deeptrace-backend
+backend/transport/deeptrace-server
