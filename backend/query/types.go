@@ -53,6 +53,7 @@ type QuerierListRequest struct {
 	Sort       *ListSort          `json:"SORT,omitempty"`
 	IncludeHis bool               `json:"INCLUDE_HISTORY"`
 	Top        FlexInt            `json:"TOP"`
+	DataSource string             `json:"DATA_SOURCE"`
 	Interval   int                `json:"interval"`
 	WindowSize int                `json:"window_size"`
 	Fill       string             `json:"fill"`

@@ -25,7 +25,11 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	if tbl == "" { tbl = "l7_flow_log" }
 	resolvedTbl := tbl
 	if db == "flow_metrics" && !strings.Contains(tbl, ".") {
-		resolvedTbl = tbl + ".1m"
+		if req.DataSource != "" {
+			resolvedTbl = tbl + "." + req.DataSource
+		} else {
+			resolvedTbl = tbl + ".1m"
+		}
 	}
 	// If range exceeds 1 day (1440 min), clamp to last day and mark partial.
 	ts := req.TimeStart
@@ -71,7 +75,11 @@ func QueryTop(zt *client.ZerotraceService, bodyStr string) (*query.Result, error
 	if tbl == "" { tbl = "l7_flow_log" }
 	resolvedTbl := tbl
 	if db == "flow_metrics" && !strings.Contains(tbl, ".") {
-		resolvedTbl = tbl + ".1m"
+		if req.DataSource != "" {
+			resolvedTbl = tbl + "." + req.DataSource
+		} else {
+			resolvedTbl = tbl + ".1m"
+		}
 	}
 	// If range exceeds 1 day (1440 min), clamp to last day and mark partial.
 	ts := req.TimeStart
@@ -91,9 +99,12 @@ func QueryTop(zt *client.ZerotraceService, bodyStr string) (*query.Result, error
 	qid := ""
 	if len(req.Queries) > 0 { qid = req.Queries[0].QueryID }
 	rows, err := zt.QueryRaw(db, sql)
-	if err != nil { log.Printf("⚠️  querier.Top error: %v", err); return nil, nil }
+	if err != nil {
+		log.Printf("⚠️  querier.Top error: %v", err)
+		return &query.Result{Data: []map[string]interface{}{}}, nil
+	}
 	if len(rows.Values) == 0 {
-		return &query.Result{Data: []map[string]interface{}{}, Type: "Application_Detail_Top"}, nil
+		return &query.Result{Data: []map[string]interface{}{}}, nil
 	}
 	data := flowlog.BuildData(rows, "")
 	schemas := flowlog.BuildSchemas(rows, qid)
@@ -110,7 +121,7 @@ func QueryTop(zt *client.ZerotraceService, bodyStr string) (*query.Result, error
 	if isPartial { os = "PARTIAL_RESULT" }
 	desc := ""
 	if os == "PARTIAL_RESULT" { desc = "最大可查询时间为 1440 分钟" }
-	return &query.Result{Data: data, Type: "Application_Detail_Top", Fields: schemas, OptStatus: os, Description: desc}, nil
+	return &query.Result{Data: data, Type: "", OptStatus: os, Description: desc}, nil
 }
 
 // consolidateHistory groups time-bucketed ZT rows into HISTORY arrays,
@@ -182,6 +193,8 @@ func parseMetricKeys(sel string, metrics []string) map[string]bool {
 	}
 	return keys
 }
+
+// fallbackTopQueryCH tries a direct CH query when ZT fails on Top queries.
 
 func toFloat64(v interface{}) (float64, bool) {
 	switch n := v.(type) { case float64: return n, true; case int64: return float64(n), true; case json.Number: if f, err := n.Float64(); err == nil { return f, true } }
