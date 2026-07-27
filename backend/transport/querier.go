@@ -427,7 +427,7 @@ func appendTopoInstanceFm(instances []map[string]interface{}, seen map[string]bo
 	svcID := fmt.Sprintf("%v", row["auto_service_id"+suffix])
 	svcType := fmt.Sprintf("%v", row["auto_service_type"+suffix])
 	obs := fmt.Sprintf("%v", row["observation_point"])
-	key := svcID + "|" + svcType + "|" + obs + "|" + role
+	key := svcID + "|" + svcType + "|" + obs + "|" + svcName
 	if seen[key] {
 		return instances
 	}
@@ -501,7 +501,7 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 	svcName := getStrVal(row, "auto_service"+suffix)
 	obs := getStrVal(row, "observation_point")
 	isNet := getStrVal(row, "is_internet"+suffix)
-	key := svcID + "|" + obs + "|" + isNet + "|" + role + "|" + svcName
+	key := svcID + "|" + obs + "|" + isNet + "|" + svcName
 	if seen[key] {
 		return instances
 	}
