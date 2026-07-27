@@ -85,12 +85,18 @@ func chQueryShowTagValues(req svRequest) []interface{} {
 		resolvedTbl = tbl + ".1m"
 	}
 
-	// Step 1: check if the tag has enum values in system.columns.comment.
-	if values := queryEnumFromComment(resolvedDB, resolvedTbl, tag, req.Like, limitVal(req.Limit)); values != nil {
+	// Step 1: check if the tag has known values in flow_tag.int_enum_map (authoritative).
+	if values := queryEnumFromFlowTag(tag, req.Like, limitVal(req.Limit)); values != nil {
 		return values
 	}
 
-	// Step 2: check if the tag is a resource tag known in flow_tag mapping.
+	// Step 2: check if the tag has enum values in system.columns.comment (stale fallback).
+	if values := queryEnumFromComment(resolvedDB, resolvedTbl, tag, req.Like, limitVal(req.Limit)); values != nil {
+		enrichEnumEntries(values, tag)
+		return values
+	}
+
+	// Step 3: check if the tag is a resource tag known in flow_tag mapping.
 	if values := queryResourceTag(req, resolvedDB, resolvedTbl, tag, req.Like, limitVal(req.Limit)); values != nil {
 		return values
 	}
@@ -106,8 +112,11 @@ func chQueryShowTagValues(req svRequest) []interface{} {
 	// for tags that have known enum mappings (e.g. signal_source).
 	if data != nil {
 		enrichEnumEntries(data, tag)
+		return data
 	}
-	return data
+
+	// Step 5: hardcoded fallback for well-known tags not found in any other source.
+	return queryBuiltinEnumFallback(tag, req.Like, limitVal(req.Limit))
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +329,27 @@ func applyLikeToEntries(entries []enumEntry, like, tag string) []enumEntry {
 		return entries
 	}
 
-	// Parse equality filter: `tag_name`=value
+	// Handle OR expressions: split by " OR " and collect union of matching values.
+	orParts := strings.Split(like, " OR ")
+	if len(orParts) > 1 {
+		var union []enumEntry
+		seen := map[string]bool{}
+		for _, part := range orParts {
+			filtered := applyLikeToEntries(entries, strings.TrimSpace(part), tag)
+			for _, e := range filtered {
+				key := fmt.Sprintf("%v", e.Value)
+				if !seen[key] {
+					seen[key] = true
+					union = append(union, e)
+				}
+			}
+		}
+		return union
+	}
+
+	// Parse equality filter: `tag_name`=value(s)
+	// Note: (.+) is intentionally greedy so that `col`=0 OR `col`=4 produces
+	// a single SQL expression "0 OR `col`=4" which parseLikeToWhere handles.
 	eqRe := regexp.MustCompile("`([^`]+)`\\s*=\\s*(.+)")
 	if m := eqRe.FindStringSubmatch(like); m != nil {
 		targetTag := m[1]
@@ -411,8 +440,16 @@ func queryEnumFromFlowTag(tag, like string, limit int) []interface{} {
 
 	entries := make([]enumEntry, 0, len(rows))
 	for _, row := range rows {
+		// Convert value to number for JSON compatibility (ClickHouse FORMAT JSON
+		// returns UInt64 as string). Cloud API expects numeric JSON values.
+		val := row["value"]
+		if s, ok := val.(string); ok {
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
+				val = f
+			}
+		}
 		entries = append(entries, enumEntry{
-			Value:       row["value"],
+			Value:       val,
 			DisplayName: getSVStr(row, "name_zh"),
 			Description: getSVStr(row, "description_zh"),
 		})
@@ -434,6 +471,63 @@ func queryEnumFromFlowTag(tag, like string, limit int) []interface{} {
 	}
 	return result
 }
+
+// builtinEnumFallback provides hardcoded enum values for well-known tags
+// that have fixed mappings not stored in flow_tag.int_enum_map.
+// Matches the fallback enum maps in enum.go and the cloud API behavior.
+var builtinEnumFallback = map[string]map[string]string{
+	"event_type": {
+		"read":      "读",
+		"write":     "写",
+	},
+}
+
+// queryBuiltinEnumFallback returns hardcoded enum values for known tags
+// whose enum mappings are not stored in int_enum_map or column comments.
+func queryBuiltinEnumFallback(tag, like string, limit int) []interface{} {
+	fb, ok := builtinEnumFallback[tag]
+	if !ok || len(fb) == 0 {
+		return nil
+	}
+	// Sort by key for stable output.
+	keys := make([]string, 0, len(fb))
+	for k := range fb {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	entries := make([]enumEntry, 0, len(keys))
+	for _, k := range keys {
+		// Use string for LowCardinality(String) tags like event_type,
+		// numeric for integer-typed tags like response_status.
+		val := interface{}(k)
+		if f, err := strconv.ParseFloat(k, 64); err == nil {
+			val = f
+		}
+		entries = append(entries, enumEntry{
+			Value:       val,
+			DisplayName: fb[k],
+			Description: "",
+		})
+	}
+
+	// Apply LIKE filter.
+	if like != "" {
+		entries = applyLikeToEntries(entries, like, tag)
+	}
+
+	// Apply limit.
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+
+	result := make([]interface{}, len(entries))
+	for i, e := range entries {
+		result[i] = e
+	}
+	return result
+}
+
 
 // ---------------------------------------------------------------------------
 // Resource tag handling — query flow_tag mapping tables
@@ -640,6 +734,12 @@ func queryDistinctValues(req svRequest, colName, like string, limit int) []inter
 	result := make([]interface{}, 0, len(rows))
 	for _, row := range rows {
 		val := row["v"]
+		// Convert string values to float64 for JSON numeric compatibility.
+		if s, ok := val.(string); ok {
+			if f, err := strconv.ParseFloat(s, 64); err == nil {
+				val = f
+			}
+		}
 		result = append(result, enumEntry{
 			Value:       val,
 			DisplayName: fmt.Sprintf("%v", val),
@@ -666,12 +766,31 @@ func parseLikeToWhere(like, currentTag string) []string {
 
 	var wheres []string
 
-	// Handle AND expressions.
-	parts := strings.Split(like, " AND ")
-	for _, part := range parts {
+	// Handle AND expressions first.
+	andParts := strings.Split(like, " AND ")
+	for _, part := range andParts {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
+		}
+
+		// Handle OR within the AND part.
+		orParts := strings.Split(part, " OR ")
+		if len(orParts) > 1 {
+			var orClauses []string
+			for _, op := range orParts {
+				op = strings.TrimSpace(op)
+				eqRe := regexp.MustCompile("`([^`]+)`\\s*=\\s*(.+)")
+				if m := eqRe.FindStringSubmatch(op); m != nil {
+					col := strings.TrimSpace(m[1])
+					val := strings.TrimSpace(m[2])
+					orClauses = append(orClauses, fmt.Sprintf("`%s` = %s", col, val))
+				}
+			}
+			if len(orClauses) > 0 {
+				wheres = append(wheres, "("+strings.Join(orClauses, " OR ")+")")
+				continue
+			}
 		}
 
 		// Handle equality: `col`=value
