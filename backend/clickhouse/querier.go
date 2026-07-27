@@ -616,41 +616,79 @@ func (s *CHService) QueryFlowLogDetail(ctx context.Context, bodyStr string) (*Qu
 	return &QueryFlowLogResult{Data: processed}, nil
 }
 
+// serviceKey and serviceAgg are used by QueryTraceMap for service-level aggregation.
+type serviceKey struct{ id, typ float64 }
+type serviceAgg struct {
+	name           string
+	parentIDs      map[serviceKey]bool
+	childIDs       map[serviceKey]bool
+	total          float64
+	responseTotal  float64
+	durationSum    float64
+	successCount   float64
+	serverErrCount float64
+}
+
 // ---------------------------------------------------------------------------
 // QueryTraceMap — returns TraceMap node data from ClickHouse
 // ---------------------------------------------------------------------------
 
-func (s *CHService) QueryTraceMap(ctx context.Context, bodyStr string) (*QueryTraceMapResult, error) {
-	var req struct {
-		TraceID string `json:"trace_id"`
-	}
-	json.Unmarshal([]byte(bodyStr), &req)
-
-	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64, queryCondition string) (*QueryTraceMapResult, error) {
+	qCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
-	var sqlStr string
-	if req.TraceID != "" {
-		sqlStr = `SELECT trace_id, span_id, parent_span_id, app_service, app_instance,
-			response_duration, start_time, end_time, request_type, request_resource,
-			response_code, response_status, l7_protocol, observation_point,
-			signal_source,
-			auto_service_id_0, auto_service_id_1, x_request_id_0, x_request_id_1
-			FROM flow_log.l7_flow_log
-			WHERE trace_id = ` + quoteCH(req.TraceID) + ` AND span_id != '' AND time >= now() - INTERVAL 7 DAY
-			LIMIT 200`
+	// Build WHERE clause with time range, base filters, and query_condition.
+	var whereClauses []string
+	whereClauses = append(whereClauses, fmt.Sprintf("time >= %d", timeStart))
+	whereClauses = append(whereClauses, fmt.Sprintf("time <= %d", timeEnd))
+	if queryCondition != "" {
+		// query_condition contains backtick-quoted column filters like:
+		// `l7_protocol`!=20 AND `response_status`!=4
+		// Strip backticks for ClickHouse compatibility or keep them if they work.
+		whereClauses = append(whereClauses, queryCondition)
+	}
+	whereSQL := strings.Join(whereClauses, " AND ")
+
+	// Query service pairs with aggregated metrics.
+	// Query COUNT for unique traces first (total and calculated).
+	var traceCountSQL string
+	if queryCondition != "" {
+		traceCountSQL = fmt.Sprintf(
+			"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log WHERE %s", whereSQL)
 	} else {
-		sqlStr = `SELECT trace_id, span_id, parent_span_id, app_service, app_instance,
-			response_duration, start_time, end_time, request_type, request_resource,
-			response_code, response_status, l7_protocol, observation_point,
-			auto_service_id_0, auto_service_id_1, x_request_id_0, x_request_id_1
-			FROM flow_log.l7_flow_log
-			WHERE trace_id != '' AND span_id != '' AND signal_source != 255 AND time >= now() - INTERVAL 7 DAY
-			ORDER BY start_time ASC
-			LIMIT 200`
+		traceCountSQL = fmt.Sprintf(
+			"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log WHERE %s", whereSQL)
+	}
+	var totalTraceCount, calcTraceCount int64
+	if rows2, err2 := s.Query(qCtx, traceCountSQL); err2 == nil {
+		if td, e2 := ScanRows(rows2); e2 == nil && len(td) > 0 {
+			totalTraceCount = int64(GetF64(td[0], "total_traces"))
+			calcTraceCount = int64(GetF64(td[0], "calc_traces"))
+		}
+		rows2.Close()
 	}
 
-	log.Printf("CH TraceMap: %s", sqlStr[:min(len(sqlStr), 250)])
+	// Query service pairs with aggregated metrics.
+	sqlStr := fmt.Sprintf(`
+		SELECT
+			auto_service_id_0, auto_service_type_0,
+			auto_service_id_1, auto_service_type_1,
+			dictGet('flow_tag.biz_service_map', 'name', toUInt64(auto_service_id_0)) AS auto_service_name_0,
+			dictGet('flow_tag.biz_service_map', 'name', toUInt64(auto_service_id_1)) AS auto_service_name_1,
+			Count(*) AS total,
+			Count(response_duration) AS response_total,
+			Sum(response_duration) AS response_duration_sum,
+			CountIf(response_status = 0) AS response_success_count,
+			CountIf(response_status = 3 OR response_status = 5) AS response_status_server_error_count,
+			Avg(response_duration) AS avg_response_duration
+		FROM flow_log.l7_flow_log
+		WHERE %s
+		GROUP BY
+			auto_service_id_0, auto_service_type_0,
+			auto_service_id_1, auto_service_type_1
+		ORDER BY total DESC`, whereSQL)
+
+	log.Printf("CH TraceMap: %s", sqlStr[:min(len(sqlStr), 300)])
 
 	rows, err := s.Query(qCtx, sqlStr)
 	if err != nil {
@@ -666,112 +704,272 @@ func (s *CHService) QueryTraceMap(ctx context.Context, bodyStr string) (*QueryTr
 		return &QueryTraceMapResult{}, nil
 	}
 
-	byID := map[string]int{}
-	for i, r := range allData {
-		if sid, ok := r["span_id"].(string); ok {
-			byID[sid] = i
-		}
+	// -----------------------------------------------------------------------
+	// Step 1: Extract unique services and aggregate metrics per service.
+	// -----------------------------------------------------------------------
+
+	svcMap := map[serviceKey]*serviceAgg{}
+
+	for _, row := range allData {
+		// Client service (_0)
+		sk0 := serviceKey{GetF64(row, "auto_service_id_0"), GetF64(row, "auto_service_type_0")}
+		// Server service (_1)
+		sk1 := serviceKey{GetF64(row, "auto_service_id_1"), GetF64(row, "auto_service_type_1")}
+
+		total := GetF64(row, "total")
+		rTotal := GetF64(row, "response_total")
+		durSum := GetF64(row, "response_duration_sum")
+		succ := GetF64(row, "response_success_count")
+		errCnt := GetF64(row, "response_status_server_error_count")
+		agg0 := getOrCreate(svcMap, sk0, GetStr(row, "auto_service_name_0"))
+		agg0.total += total
+		agg0.responseTotal += rTotal
+		agg0.durationSum += durSum
+		agg0.successCount += succ
+		agg0.serverErrCount += errCnt
+		agg0.childIDs[sk1] = true
+
+		agg1 := getOrCreate(svcMap, sk1, GetStr(row, "auto_service_name_1"))
+		agg1.total += total
+		agg1.responseTotal += rTotal
+		agg1.durationSum += durSum
+		agg1.successCount += succ
+		agg1.serverErrCount += errCnt
+		agg1.parentIDs[sk0] = true
 	}
 
-	levelOf := make([]int, len(allData))
-	for i, r := range allData {
-		levelOf[i] = 1
-		pid := GetStr(r, "parent_span_id")
-		for pid != "" {
-			if idx, ok := byID[pid]; ok {
-				levelOf[i]++
-				pid = GetStr(allData[idx], "parent_span_id")
-			} else {
+	// -----------------------------------------------------------------------
+	// Step 2: Compute levels (BFS from root services that have no parent).
+	// -----------------------------------------------------------------------
+	levelOf := map[serviceKey]int{}
+	// Find roots: services with no parents (or self-only parents).
+	var roots []serviceKey
+	for sk, agg := range svcMap {
+		hasRealParent := false
+		for p := range agg.parentIDs {
+			if p != sk {
+				hasRealParent = true
 				break
 			}
 		}
+		if !hasRealParent {
+			roots = append(roots, sk)
+		}
+	}
+	// BFS from roots
+	queue := roots
+	for _, sk := range roots {
+		levelOf[sk] = 0
+	}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		agg := svcMap[cur]
+		for child := range agg.childIDs {
+			if child == cur {
+				continue
+			}
+			newLevel := levelOf[cur] + 1
+			if existing, ok := levelOf[child]; !ok || newLevel > existing {
+				levelOf[child] = newLevel
+				queue = append(queue, child)
+			}
+		}
 	}
 
-	var nodes []map[string]interface{}
-	for i, r := range allData {
-		svc := GetStr(r, "app_service")
-		if svc == "" {
-			svc = GetStr(r, "app_instance")
-		}
-		if svc == "" {
-			svc = fmt.Sprintf("span-%s", GetStr(r, "span_id"))
-		}
-		svcID := GetF64(r, "auto_service_id_1")
+	// -----------------------------------------------------------------------
+	// Step 3: Build nodes.
+	// -----------------------------------------------------------------------
+	// Map from serviceKey → node index for parent references.
+	nodeIdx := map[serviceKey]int{}
+	nodes := make([]map[string]interface{}, 0, len(svcMap))
 
-		// Get signal_source from data, default to 4.
-		sigSrc := GetF64(r, "signal_source")
-		if sigSrc == 0 && GetStr(r, "signal_source") == "" {
-			sigSrc = 4
+	for sk, agg := range svcMap {
+		nodeType := serviceTypeToNodeType(sk.typ)
+		iconID := serviceTypeToIconID(sk.typ)
+		uid := fmt.Sprintf("self_index=%d,auto_service_id=%v,auto_service_type=%v", len(nodes), sk.id, sk.typ)
+		total := agg.total
+		durSum := agg.durationSum
+		rTotal := agg.responseTotal
+
+		// Compute derived metrics
+		avgDur := float64(0)
+		if rTotal > 0 {
+			avgDur = durSum / rTotal
 		}
+		successRatio := float64(0)
+		if rTotal > 0 {
+			successRatio = agg.successCount / rTotal
+		}
+
 		node := map[string]interface{}{
-			"level":             levelOf[i],
-			"signal_source":     sigSrc,
-			"response_code":     r["response_code"],
-			"response_status":   GetF64(r, "response_status"),
-			"auto_service_type": float64(11),
-			"auto_service_id":   svcID,
-			"icon_id":           float64(-16),
-			"ip":                "",
-			"uid":               fmt.Sprintf("self_index=%d,auto_service_id=%v,app_service=%s", i, svcID, svc),
-			"node_type":         "pod_service",
-			"app_service":       svc,
-			"service_uid":       fmt.Sprintf("auto_service_id=%v,app_service=%s", svcID, svc),
-			"auto_service":      svc,
-			"observation_point": GetStr(r, "observation_point"),
+			"level":                     levelOf[sk],
+			"auto_service_type":         sk.typ,
+			"auto_service_id":           sk.id,
+			"auto_service":              agg.name,
+			"app_service":               agg.name,
+			"node_type":                 nodeType,
+			"icon_id":                   iconID,
+			"uid":                       uid,
+			"service_uid":               uid,
+			"response_code":             float64(0),
+			"response_status":           float64(0),
+			"response_exception":        "",
+			"biz_response_code":         "",
+			"ip":                        "",
+			"observation_point":         "",
+			"signal_source":             float64(4),
+			"inferred_application_type": "",
+
+			// Aggregated metrics
+			"total":                              total,
+			"response_total":                     rTotal,
+			"response_duration_sum":              durSum,
+			"response_success_count":             agg.successCount,
+			"response_status_server_error_count": agg.serverErrCount,
+			"avg_response_duration":              avgDur,
+			"avg_success_ratio":                  successRatio,
+			"avg_response_ratio":                 float64(1),
+
+			// These fields are present in cloud response
+			"sum_request":        float64(0),
+			"endpoints_0":        []interface{}{},
+			"endpoints_1":        []interface{}{},
+			"endpoint_stats_0":   []interface{}{},
+			"endpoint_stats_1":   []interface{}{},
+			"trace_ids":          []interface{}{},
+			"abnormal_trace_ids": []interface{}{},
+			"gprocess_ids":       []interface{}{},
+
+			// Parent info (populated below)
 			"parent_node_infos": []interface{}{},
 		}
-
-		pid := GetStr(r, "parent_span_id")
-		if pIdx, ok := byID[pid]; ok && pIdx != i {
-			parent := allData[pIdx]
-			pSvc := GetStr(parent, "app_service")
-			if pSvc == "" {
-				pSvc = GetStr(parent, "app_instance")
-			}
-			if pSvc == "" {
-				pSvc = fmt.Sprintf("span-%s", GetStr(parent, "span_id"))
-			}
-			node["parent_node_infos"] = []interface{}{
-				map[string]interface{}{
-					"pseudo_link":                        0,
-					"parent_index":                       pIdx,
-					"total":                              1,
-					"response_total":                     1,
-					"response_duration_sum":              GetF64(r, "response_duration"),
-					"response_status_server_error_count": 0,
-					"response_success_count":             1,
-					"uniq_parent_span_infos": []interface{}{
-						map[string]interface{}{
-							"signal_source":       sigSrc,
-							"auto_service_type_0": float64(11),
-							"auto_service_type_1": float64(11),
-							"auto_service_id_0":   GetF64(parent, "auto_service_id_1"),
-							"auto_service_id_1":   svcID,
-							"client_icon_id":      float64(-16),
-							"server_icon_id":      float64(-16),
-							"observation_point":   GetStr(r, "observation_point"),
-							"ip_0":                "",
-							"ip_1":                "",
-							"app_service_0":       pSvc,
-							"app_service_1":       svc,
-							"auto_service_0":      pSvc,
-							"auto_service_1":      svc,
-							"client_node_type":    "pod_service",
-							"server_node_type":    "pod_service",
-							"endpoints":           []interface{}{GetStr(r, "request_resource")},
-						},
-					},
-				},
-			}
-		}
+		nodeIdx[sk] = len(nodes)
 		nodes = append(nodes, node)
+	}
+
+	// -----------------------------------------------------------------------
+	// Step 4: Build parent_node_infos edges.
+	// -----------------------------------------------------------------------
+	for _, row := range allData {
+		sk0 := serviceKey{GetF64(row, "auto_service_id_0"), GetF64(row, "auto_service_type_0")}
+		sk1 := serviceKey{GetF64(row, "auto_service_id_1"), GetF64(row, "auto_service_type_1")}
+		if sk0 == sk1 {
+			continue
+		}
+		idx1, ok := nodeIdx[sk1]
+		if !ok {
+			continue
+		}
+		par := nodes[idx1]["parent_node_infos"].([]interface{})
+
+		total := GetF64(row, "total")
+		rTotal := GetF64(row, "response_total")
+		durSum := GetF64(row, "response_duration_sum")
+		succ := GetF64(row, "response_success_count")
+		errCnt := GetF64(row, "response_status_server_error_count")
+
+		parentInfo := map[string]interface{}{
+			"pseudo_link":                        0,
+			"parent_index":                       nodeIdx[sk0],
+			"total":                              total,
+			"response_total":                     rTotal,
+			"response_duration_sum":              durSum,
+			"response_status_server_error_count": errCnt,
+			"response_success_count":             succ,
+			"uniq_parent_span_infos": []interface{}{
+				map[string]interface{}{
+					"signal_source":       GetF64(row, "signal_source"),
+					"auto_service_type_0": GetF64(row, "auto_service_type_0"),
+					"auto_service_type_1": GetF64(row, "auto_service_type_1"),
+					"auto_service_id_0":   GetF64(row, "auto_service_id_0"),
+					"auto_service_id_1":   GetF64(row, "auto_service_id_1"),
+					"client_icon_id":      serviceTypeToIconID(GetF64(row, "auto_service_type_0")),
+					"server_icon_id":      serviceTypeToIconID(GetF64(row, "auto_service_type_1")),
+					"observation_point":   "",
+					"ip_0":                "",
+					"ip_1":                "",
+					"app_service_0":       GetStr(row, "auto_service_name_0"),
+					"app_service_1":       GetStr(row, "auto_service_name_1"),
+					"auto_service_0":      GetStr(row, "auto_service_name_0"),
+					"auto_service_1":      GetStr(row, "auto_service_name_1"),
+					"client_node_type":    serviceTypeToNodeType(GetF64(row, "auto_service_type_0")),
+					"server_node_type":    serviceTypeToNodeType(GetF64(row, "auto_service_type_1")),
+					"endpoints":           []interface{}{},
+				},
+			},
+		}
+		nodes[idx1]["parent_node_infos"] = append(par, parentInfo)
 	}
 
 	return &QueryTraceMapResult{
 		Data:             nodes,
-		TotalTraces:      1,
-		CalculatedTraces: 1,
+		TotalTraces:      int(totalTraceCount),
+		CalculatedTraces: int(calcTraceCount),
 	}, nil
+}
+
+// serviceTypeToNodeType maps auto_service_type to node_type string.
+func serviceTypeToNodeType(typ float64) string {
+	switch int(typ) {
+	case 1:
+		return "vm"
+	case 10:
+		return "pod"
+	case 11:
+		return "pod_service"
+	case 15:
+		return "rds_instance"
+	case 103:
+		return "biz_service"
+	case 104:
+		return "biz_service_group"
+	case 105:
+		return "alb"
+	case 255:
+		return "other"
+	default:
+		return "biz_service"
+	}
+}
+
+// serviceTypeToIconID maps auto_service_type to icon_id.
+func serviceTypeToIconID(typ float64) float64 {
+	switch int(typ) {
+	case 1:
+		return -19 // VM
+	case 10:
+		return -14 // Pod
+	case 11:
+		return -16 // Pod Service
+	case 15:
+		return -36 // RDS
+	case 103:
+		return -45 // Business Service
+	case 104:
+		return -46 // Business Service Group
+	case 105:
+		return -47 // ALB
+	default:
+		return -45 // default biz_service icon
+	}
+}
+
+// getOrCreate returns an existing serviceAgg or creates a new one.
+func getOrCreate(m map[serviceKey]*serviceAgg, key serviceKey, name string) *serviceAgg {
+	if a, ok := m[key]; ok {
+		if name != "" && a.name == "" {
+			a.name = name
+		}
+		return a
+	}
+	a := &serviceAgg{
+		name:          name,
+		parentIDs:     map[serviceKey]bool{},
+		childIDs:      map[serviceKey]bool{},
+	}
+	m[key] = a
+	return a
 }
 
 // convertHistory transforms history query data for Top result rows.

@@ -134,8 +134,7 @@ func (d *CHDataSource) QueryTraceMap(ctx context.Context, req *query.QuerierList
 	if d.ch == nil || !d.ch.Enabled() {
 		return nil, nil
 	}
-	bodyBytes, _ := json.Marshal(req)
-	result, err := d.ch.QueryTraceMap(ctx, string(bodyBytes))
+	result, err := d.ch.QueryTraceMap(ctx, req.TimeStart, req.TimeEnd, "")
 	if err != nil {
 		return nil, err
 	}
