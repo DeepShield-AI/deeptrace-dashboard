@@ -65,6 +65,7 @@ func (s *CHService) QueryList(ctx context.Context, req *QuerierRequest) (*QueryL
 
 	data, err := ScanRows(rows)
 	if err != nil {
+		log.Printf("CH scan error: %v", err)
 		return nil, fmt.Errorf("scan: %w", err)
 	}
 	if data == nil {
@@ -243,14 +244,17 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 
 	rows, err := s.Query(qCtx, querySQL)
 	if err != nil {
+		log.Printf("CH query error: %v", err)
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
 
 	data, err := ScanRows(rows)
 	if err != nil {
+		log.Printf("CH scan error: %v", err)
 		return nil, fmt.Errorf("scan: %w", err)
 	}
+	log.Printf("CH QueryTop OK: %d rows", len(data))
 
 	topColMap := map[string]string{
 		"auto_service":    "app_service",

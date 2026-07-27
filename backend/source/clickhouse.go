@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"deeptrace-backend/clickhouse"
+	"log"
 	"deeptrace-backend/query"
 )
 
@@ -87,6 +88,7 @@ func (d *CHDataSource) QueryTop(ctx context.Context, req *query.QuerierListReque
 		return nil, nil
 	}
 	addRegion(result.Data)
+	log.Printf("CH source: %d rows, first keys=%v", len(result.Data), func() []string { var kk []string; for k := range result.Data[0] { kk = append(kk, k) }; return kk }())
 	return &query.Result{
 		Data:   result.Data,
 		Fields: result.Fields,

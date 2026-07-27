@@ -15,6 +15,7 @@ func buildHistory(data []map[string]interface{}, sel string, metrics []string,
 		return data
 	}
 	mk := historyParseMetrics(sel, metrics)
+	log.Printf("buildHistory: data[0] keys=%v mk=%v", func() []string { var kk []string; for k := range data[0] { kk = append(kk, k) }; return kk }(), func() []string { var kk []string; for k := range mk { kk = append(kk, k) }; return kk }())
 	hasTime := false
 	for k := range data[0] {
 		if k == "time" {

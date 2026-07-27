@@ -18,8 +18,11 @@ func (s *QuerierService) QueryTop(ctx context.Context, req *QuerierListRequest) 
 			if len(req.Queries) > 0 {
 				fillTopExtraFields(req.Queries[0].Select, result.Data)
 				if req.IncludeHis && req.Interval > 0 && len(result.Data) > 0 {
-					result.Data = buildHistory(result.Data, req.Queries[0].Select,
-						req.Queries[0].Metrics, req.TimeStart, req.TimeEnd, int64(req.Interval), req.Fill)
+					// If data already has HISTORY (from CH post-processing), skip buildHistory.
+					if _, hasHist := result.Data[0]["HISTORY"]; !hasHist {
+						result.Data = buildHistory(result.Data, req.Queries[0].Select,
+							req.Queries[0].Metrics, req.TimeStart, req.TimeEnd, int64(req.Interval), req.Fill)
+					}
 				}
 			}
 			return result, nil
