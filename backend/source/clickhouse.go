@@ -35,6 +35,8 @@ func toCHRequest(req *query.QuerierListRequest) *clickhouse.QuerierRequest {
 		PageSize:  req.PageSize,
 		TimeStart: req.TimeStart,
 		TimeEnd:   req.TimeEnd,
+		Interval:   req.Interval,
+		DataSource: req.DataSource,
 	}
 	for _, q := range req.Queries {
 		chReq.Queries = append(chReq.Queries, clickhouse.QuerierSub{

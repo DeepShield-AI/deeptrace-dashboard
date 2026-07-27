@@ -172,6 +172,13 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 
 		if IsAggExpr(item.Expr) {
 			sqlExpr := NormalizeExpr(item.Expr)
+			// Column alias: rrt -> rrt_sum/greatest(rrt_count,1) for tables without physical rrt column
+			if !strings.Contains(sqlExpr, "rrt_sum") && !strings.Contains(sqlExpr, "rrt_count") {
+				sqlExpr = strings.ReplaceAll(sqlExpr, "rrt", "rrt_sum / greatest(rrt_count, 1)")
+			}
+			if !strings.Contains(sqlExpr, "rtt_sum") && !strings.Contains(sqlExpr, "rtt_count") {
+				sqlExpr = strings.ReplaceAll(sqlExpr, "rtt", "rtt_sum / greatest(rtt_count, 1)")
+			}
 			if isFlowLog {
 				cleanExpr := strings.ToLower(strings.ReplaceAll(item.Expr, "`", ""))
 				existsInFlowLog := strings.Contains(cleanExpr, "response_duration") ||
@@ -196,12 +203,10 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 
 	var wheres []string
 	if req.TimeStart > 0 {
-		ts := time.Unix(req.TimeStart, 0).In(time.UTC).Format("2006-01-02 15:04:05")
-		wheres = append(wheres, fmt.Sprintf("time >= '%s'", ts))
+		wheres = append(wheres, fmt.Sprintf("time >= %d", req.TimeStart))
 	}
 	if req.TimeEnd > 0 {
-		ts := time.Unix(req.TimeEnd, 0).In(time.UTC).Format("2006-01-02 15:04:05")
-		wheres = append(wheres, fmt.Sprintf("time <= '%s'", ts))
+		wheres = append(wheres, fmt.Sprintf("time <= %d", req.TimeEnd))
 	}
 	if q.Where != "" {
 		cleanWhere := cleanWhereClause(q.Where)
@@ -222,7 +227,18 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	querySQL := fmt.Sprintf("SELECT %s FROM %s%s LIMIT 1", strings.Join(metricSelects, ", "), fullTable, whereClause)
+	var selectCols []string
+	if req.Interval > 0 {
+		selectCols = append(selectCols, "toUnixTimestamp(toStartOfInterval(time, toIntervalSecond(1))) AS `time`")
+	}
+	selectCols = append(selectCols, metricSelects...)
+	limitPart := " LIMIT 1"
+	groupPart := ""
+	if req.Interval > 0 {
+		limitPart = ""
+		groupPart = " GROUP BY `time` ORDER BY `time`"
+	}
+	querySQL := fmt.Sprintf("SELECT %s FROM %s%s%s%s", strings.Join(selectCols, ", "), fullTable, whereClause, groupPart, limitPart)
 	log.Printf("CH Top SQL: %s", querySQL)
 
 	rows, err := s.Query(qCtx, querySQL)
@@ -514,12 +530,10 @@ func (s *CHService) QueryFlowLogDetail(ctx context.Context, bodyStr string) (*Qu
 
 	var wheres []string
 	if req.TimeStart > 0 {
-		ts := time.Unix(req.TimeStart, 0).In(time.UTC).Format("2006-01-02 15:04:05")
-		wheres = append(wheres, fmt.Sprintf("time >= '%s'", ts))
+		wheres = append(wheres, fmt.Sprintf("time >= %d", req.TimeStart))
 	}
 	if req.TimeEnd > 0 {
-		ts := time.Unix(req.TimeEnd, 0).In(time.UTC).Format("2006-01-02 15:04:05")
-		wheres = append(wheres, fmt.Sprintf("time <= '%s'", ts))
+		wheres = append(wheres, fmt.Sprintf("time <= %d", req.TimeEnd))
 	}
 
 	sql := fmt.Sprintf("SELECT %s FROM %s", selectCols, fullTable)

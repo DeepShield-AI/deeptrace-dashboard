@@ -25,6 +25,7 @@ type QuerierRequest struct {
 	Regions   []string         `json:"REGIONS"`
 	Total     bool             `json:"TOTAL"`
 	DataSource string           `json:"DATA_SOURCE"`
+	Interval   int                `json:"interval"`
 }
 
 // QuerierSort holds sort parameters.

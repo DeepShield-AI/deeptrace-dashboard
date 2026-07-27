@@ -34,11 +34,11 @@ func main() {
 	ztDS := source.NewZerotraceDataSource(ztSvc)
 	chain.AddListSource(ztDS)
 	chain.AddTopSource(ztDS)
-	chain.AddTopSource(ztDS)
 
 	chDS := source.NewCHDataSource(cch)
 	chain.AddFlowLogSource(chDS)
 	chain.AddTraceMapSource(chDS)
+	chain.AddTopSource(chDS)
 
 	// Create the query service (central business logic entry point).
 	enumSvc := enum.NewEnumService(cch)

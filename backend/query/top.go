@@ -17,6 +17,10 @@ func (s *QuerierService) QueryTop(ctx context.Context, req *QuerierListRequest) 
 			// Fill extra fields the frontend expects (query_id, node_type, icon_id, etc.).
 			if len(req.Queries) > 0 {
 				fillTopExtraFields(req.Queries[0].Select, result.Data)
+				if req.IncludeHis && req.Interval > 0 && len(result.Data) > 0 {
+					result.Data = buildHistory(result.Data, req.Queries[0].Select,
+						req.Queries[0].Metrics, req.TimeStart, req.TimeEnd, int64(req.Interval), req.Fill)
+				}
 			}
 			return result, nil
 		}
