@@ -115,19 +115,38 @@ func handleFastFilterBlackLists(w http.ResponseWriter, r *http.Request) {
 }
 
 type fastListRequest struct {
-	DB        string `json:"db"`
-	Table     string `json:"table"`
-	TimeStart int64  `json:"time_start"`
-	TimeEnd   int64  `json:"time_end"`
-	Limit     int    `json:"limit"`
-	Offset    int    `json:"offset"`
-	Where     *struct {
+	DB         string `json:"db"`
+	Table      string `json:"table"`
+	TimeStart  int64  `json:"time_start"`
+	TimeEnd    int64  `json:"time_end"`
+	Limit      int    `json:"limit"`
+	Offset     int    `json:"offset"`
+	DataSource string `json:"data_source"`
+	Where      *struct {
 		ResourceSets []struct {
 			ID        string `json:"id"`
 			Condition []interface{} `json:"condition"` // flat [{key,op,val}] or nested AND/OR tree
 		} `json:"resourceSets"`
 		Paths []map[string]string `json:"paths"`
 	} `json:"where"`
+}
+
+// virtualColumnMap maps virtual tag names to their physical ID column counterparts.
+// When conditions compare virtual columns to numbers, ZT fails with type mismatches
+// (String vs UInt16). Route to the physical ID column for numeric comparisons.
+var virtualColumnMap = map[string]string{
+	"auto_service":  "auto_service_id",
+	"auto_instance": "auto_instance_id",
+	"chost":         "l3_device_id",
+	"host":          "l3_device_id",
+	"vpc":           "epc_id",
+	"pod_service":   "pod_service_id",
+	"pod_group":     "pod_group_id",
+	"pod_cluster":   "pod_cluster_id",
+	"pod_ns":        "pod_ns_id",
+	"pod_node":      "pod_node_id",
+	"subnet":        "subnet_id",
+	"router":        "router_id",
 }
 
 // flattenFastListConditions recursively extracts leaf conditions from a nested
@@ -145,7 +164,25 @@ func flattenFastListConditions(conds []interface{}) []string {
 			if op == "" {
 				op = "="
 			}
-			result = append(result, fmt.Sprintf("`%s` %s %v", key, op, m["val"]))
+			col := fmt.Sprintf("%v", key)
+			val := m["val"]
+
+			// Virtual tag (String) compared to number: use the physical ID column.
+			if physicalCol, mapped := virtualColumnMap[col]; mapped {
+				if _, isNum := val.(float64); isNum {
+					col = physicalCol
+				}
+			}
+
+			// Quote string values, leave numeric values unquoted.
+			var valStr string
+			if s, ok := val.(string); ok {
+				valStr = "'" + s + "'"
+			} else {
+				valStr = fmt.Sprintf("%v", val)
+			}
+
+			result = append(result, "`" + col + "` " + op + " " + valStr)
 			continue
 		}
 		// Branch condition: has "val" array (nested children)
@@ -156,11 +193,6 @@ func flattenFastListConditions(conds []interface{}) []string {
 		}
 	}
 	return result
-}
-
-type fastListRegion struct {
-	Region string `json:"region"`
-	Name   string `json:"name"`
 }
 
 // Column info for a tag or metric in the QuerierJs intermediate response.
@@ -243,19 +275,29 @@ func queryFastList(deps *Dependencies, r *http.Request, body []byte, debug bool)
 		limit = 999
 	}
 
+	// Resolve table name: for flow_metrics, append data_source suffix.
+	resolvedTbl := tbl
+	if db == "flow_metrics" && !strings.Contains(tbl, ".") {
+		ds := req.DataSource
+		if ds == "" {
+			ds = "1m"
+		}
+		resolvedTbl = tbl + "." + ds
+	}
+
 	// Build debug info even when ZT is unavailable, so debug mode always produces output.
 	di := &fastListDebugInfo{
 		requestBody: body,
 		db:          db,
-		table:       tbl,
+		table:       resolvedTbl,
 		selStr:      selStr,
 		extras:      extras,
 		limit:       limit,
 		offset:      req.Offset,
 	}
 	di.sel = fmt.Sprintf("%s, Count(row) AS count_row", selStr)
-	di.sql = query.BuildBaseSQL(di.sel, tbl, extras, req.TimeStart, req.TimeEnd,
-		selStr, "count_row", "DESC", limit, 0)
+	di.sql = query.BuildBaseSQL(di.sel, resolvedTbl, extras, req.TimeStart, req.TimeEnd,
+		selStr, "count_row", "DESC", limit, req.Offset)
 
 	zt := deps.Querier.Zerotrace
 	if zt == nil || !zt.Available() {
@@ -274,7 +316,29 @@ func queryFastList(deps *Dependencies, r *http.Request, body []byte, debug bool)
 	di.err = err
 
 	if err != nil {
-		log.Printf("⚠️  fast_list error: %v", err)
+		log.Printf("⚠️  fast_list ZT error: %v", err)
+		// Fallback: query ClickHouse directly when ZT aggregation fails.
+		if chData := chQueryFastList(deps, db, resolvedTbl, selStr, extras, req.TimeStart, req.TimeEnd, limit, req.Offset); chData != nil {
+			if !debug {
+				return chData, nil
+			}
+			data := chData
+			di.err = nil
+			di.result = &client.QueryResult{
+				Columns: []string{selStr, "count_row"},
+				Values:  make([][]interface{}, len(data)),
+			}
+			for i, row := range data {
+				m, _ := row.(map[string]interface{})
+				var vals []interface{}
+				for _, col := range strings.Split(selStr, ",") {
+					vals = append(vals, m[strings.TrimSpace(col)])
+				}
+				vals = append(vals, m["count_row"])
+				di.result.Values[i] = vals
+			}
+			return data, di
+		}
 		if debug {
 			return nil, di
 		}
@@ -306,6 +370,48 @@ func queryFastList(deps *Dependencies, r *http.Request, body []byte, debug bool)
 		return data, di
 	}
 	return data, nil
+}
+
+
+// chQueryFastList queries ClickHouse directly for fast_list when ZT doesn't support the query.
+func chQueryFastList(deps *Dependencies, db, tbl, selStr string, extras []string,
+	timeStart, timeEnd int64, limit, offset int) []interface{} {
+	if deps.CH == nil || !deps.CH.Enabled() {
+		return nil
+	}
+	// Build a ClickHouse-compatible SQL. Use count(*) to avoid ZT's Count(row) limitation.
+	sel := fmt.Sprintf("%s, count(*) AS count_row", selStr)
+	groupBy := selStr
+	sql := query.BuildBaseSQL(sel, tbl, extras, timeStart, timeEnd,
+		groupBy, "count_row", "DESC", limit, offset)
+	log.Printf("🔍 CH fast_list fallback: db=%s sql=%s", db, sql)
+
+	// Execute via ClickHouse HTTP (chHTTPQuery is in showmetrics.go).
+	// Replace backtick table references with proper quoting.
+	rows, err := chHTTPQuery(sql)
+	if err != nil {
+		log.Printf("⚠️  CH fast_list error: %v", err)
+		return nil
+	}
+
+	result := make([]interface{}, 0, len(rows))
+	for _, row := range rows {
+		r := make(map[string]interface{})
+		for k, v := range row {
+			// Translate Enum(column) display names where possible.
+			if strings.HasPrefix(k, "Enum(") {
+				if s, ok := v.(string); ok {
+					if cn := flowlog.EnumZHCN(s); cn != "" {
+						v = cn
+					}
+				}
+			}
+			r[k] = v
+		}
+		r["_querier_region"] = "本地"
+		result = append(result, r)
+	}
+	return result
 }
 
 // buildFastListDebug constructs the 4-entry _debug array matching the cloud's internal pipeline:
