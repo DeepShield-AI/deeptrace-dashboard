@@ -507,18 +507,6 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 	}
 	seen[key] = true
 
-	// Determine the correct column key for node_type and icon_id.
-	// The Top query aliases node_type(auto_service_N) as client/server_node_type
-	// and icon_id(auto_service_N) as client/server_icon_id.
-	// After cleanSelect strips them from SQL, fillTopExtraFields adds them back.
-	var nodeTypeKey, iconIDKey string
-	if suffix == "_0" {
-		nodeTypeKey = "client_node_type"
-		iconIDKey = "client_icon_id"
-	} else {
-		nodeTypeKey = "server_node_type"
-		iconIDKey = "server_icon_id"
-	}
 
 	inst := map[string]interface{}{
 		"rs_set_id":        "R1",
@@ -530,8 +518,8 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 		"auto_service":      row["auto_service"+suffix],
 		"auto_service_type": row["auto_service_type"+suffix],
 		"is_internet":       row["is_internet"+suffix],
-		"node_type":         row[nodeTypeKey],
-		"icon_id":           row[iconIDKey],
+		"node_type":         topoNodeTypeFor(int(getIntVal(row, "auto_service_type"+suffix))),
+		"icon_id":           topoIconFor(int(getIntVal(row, "auto_service_type"+suffix))),
 		"resource_l7_protocol": row["resource_l7_protocol" + suffix],
 	}
 
@@ -653,6 +641,76 @@ func buildTopoUID(row map[string]interface{}, suffix, iconKey, nodeKey string) s
 	}
 	return fmt.Sprintf("auto_service=%s,auto_service_id=%s,auto_service_type=%s,icon_id=%s,is_internet=0,node_type=%s,rs_set_id=R1",
 		svcName, svcID, svcType, iconID, nodeType)
+}
+
+// getStrVal safely extracts a string value from a map.
+// topoNodeTypeFor maps auto_service_type to node_type string (matches cloud behavior).
+func topoNodeTypeFor(t int) string {
+	switch t {
+	case 0:
+		return "internet_ip"
+	case 1:
+		return "chost"
+	case 11:
+		return "pod_service"
+	case 15:
+		return "lb"
+	case 103:
+		return "pod_cluster"
+	case 104:
+		return "biz_service"
+	case 120:
+		return "gprocess"
+	case 130, 133:
+		return "pod_group"
+	case 255:
+		return "ip"
+	default:
+		return "other"
+	}
+}
+
+// topoIconFor maps auto_service_type to icon_id (matches cloud behavior).
+func topoIconFor(t int) int {
+	switch t {
+	case 0:
+		return -1
+	case 1:
+		return -23
+	case 11:
+		return -16
+	case 15:
+		return -12
+	case 103:
+		return -13
+	case 104:
+		return -45
+	case 120:
+		return -43
+	case 130, 133:
+		return -18
+	case 255:
+		return -10
+	default:
+		return -42
+	}
+}
+
+// getIntVal safely extracts an int value from a map (returns 0 if missing/nil).
+func getIntVal(m map[string]interface{}, key string) int {
+	if v, ok := m[key]; ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int64:
+			return int(n)
+		case uint8:
+			return int(n)
+		case int:
+			return n
+		}
+	}
+	return 0
 }
 
 // getStrVal safely extracts a string value from a map.
