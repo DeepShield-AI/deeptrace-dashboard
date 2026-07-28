@@ -158,6 +158,32 @@ func NormalizeExpr(expr string) string {
 // ---------------------------------------------------------------------------
 
 // BuildSelectSQL converts a querier List request into a ClickHouse SQL string.
+
+func getFlowLogExpr(sqlExpr, originalExpr string) string {
+	if !strings.Contains(strings.ToLower(sqlExpr), "count(") {
+		cleanExpr := strings.ToLower(strings.ReplaceAll(originalExpr, "`", ""))
+		existsInFlowLog := strings.Contains(cleanExpr, "response_duration") ||
+			strings.Contains(cleanExpr, "response_code") ||
+			strings.Contains(cleanExpr, "response_status") ||
+			strings.Contains(cleanExpr, "request_type") ||
+			strings.Contains(cleanExpr, "request_domain") ||
+			strings.Contains(cleanExpr, "request_resource") ||
+			strings.Contains(cleanExpr, "response_exception") ||
+			strings.Contains(cleanExpr, "response_result") ||
+			strings.Contains(cleanExpr, "request_length") ||
+			strings.Contains(cleanExpr, "captured_request_byte") ||
+			strings.Contains(cleanExpr, "syscall_trace_id") ||
+			strings.Contains(cleanExpr, "signal_source") ||
+			strings.Contains(cleanExpr, "l7_protocol") ||
+			strings.Contains(cleanExpr, "endpoint") ||
+			strings.Contains(cleanExpr, "x_request_id")
+		if !existsInFlowLog {
+			return "count(*)"
+		}
+	}
+	return sqlExpr
+}
+
 func BuildSelectSQL(req QuerierRequest) (string, error) {
 	if len(req.Queries) == 0 {
 		return "", fmt.Errorf("no queries in request")
@@ -259,7 +285,11 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 			}
 
 		case isAgg:
-			selectParts = append(selectParts, fmt.Sprintf("%s AS `%s`", expr, item.Key))
+			sqlExpr := expr
+			if isFlowLog {
+				sqlExpr = getFlowLogExpr(sqlExpr, item.Expr)
+			}
+			selectParts = append(selectParts, fmt.Sprintf("%s AS `%s`", sqlExpr, item.Key))
 
 		case strings.HasPrefix(lower, "node_type("):
 			inner := strings.TrimSpace(item.Expr[len("node_type("):len(item.Expr)-1])
@@ -303,6 +333,38 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 	}
 	if q.Where != "" {
 		cleanWhere := cleanWhereClause(q.Where)
+		// Map API column names to physical CH column names.
+		cleanWhere = strings.ReplaceAll(cleanWhere, "`ip_0`", "`ip4_0`")
+		cleanWhere = strings.ReplaceAll(cleanWhere, "`ip_1`", "`ip4_1`")
+		cleanWhere = strings.ReplaceAll(cleanWhere, "ip_0", "ip4_0")
+		cleanWhere = strings.ReplaceAll(cleanWhere, "ip_1", "ip4_1")
+		// Strip is_internet/role conditions (ZT virtual cols, not in CH)
+		for _, vcol := range []string{"is_internet_0", "is_internet_1", "role"} {
+			for _, pat := range []string{"`" + vcol + "`", vcol} {
+				for {
+					idx := strings.Index(cleanWhere, pat)
+					if idx < 0 { break }
+					// Find the end of this condition
+					scan := idx
+					for scan < len(cleanWhere) {
+						if cleanWhere[scan] == ')' { scan++; break }
+						if scan > idx && scan+4 < len(cleanWhere) && (cleanWhere[scan:scan+5] == " AND " || cleanWhere[scan:scan+4] == " OR ") { break }
+						scan++
+					}
+					// Backtrack to the start of this condition (AND/OR/EOL)
+					start := idx
+					preAnd := strings.LastIndex(cleanWhere[:start], "AND ")
+					preOr := strings.LastIndex(cleanWhere[:start], "OR ")
+					if preOr > preAnd { preAnd = preOr }
+					if start > 0 && cleanWhere[start-1] == '(' { preAnd = strings.LastIndex(cleanWhere[:start-1], "(") }
+					if preAnd >= 0 { start = preAnd }
+					cleanWhere = cleanWhere[:start] + cleanWhere[scan:]
+				}
+			}
+		}
+		cleanWhere = strings.TrimSpace(cleanWhere)
+		cleanWhere = strings.TrimPrefix(cleanWhere, "AND ")
+		cleanWhere = strings.TrimPrefix(cleanWhere, "OR ")
 		if cleanWhere != "" {
 			wheres = append(wheres, cleanWhere)
 		}

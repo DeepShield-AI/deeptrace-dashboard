@@ -210,6 +210,17 @@ func handleTopo(srv *query.QuerierService) http.HandlerFunc {
 		var instances []map[string]interface{}
 		for _, row := range peers {
 			// Add uid_0/uid_1 to peers matching cloud format.
+			// Override ZT placeholder node_type/icon_id with our mapping so uid_0/uid_1 match instances.
+			for _, suf := range []string{"_0", "_1"} {
+				ast := int(getIntVal(row, "auto_service_type"+suf))
+				if suf == "_0" {
+					row["client_node_type"] = topoNodeTypeFor(ast)
+					row["client_icon_id"] = topoIconFor(ast)
+				} else {
+					row["server_node_type"] = topoNodeTypeFor(ast)
+					row["server_icon_id"] = topoIconFor(ast)
+				}
+			}
 			uid0 := buildTopoUID(row, "_0", "client_icon_id", "client_node_type")
 			uid1 := buildTopoUID(row, "_1", "server_icon_id", "server_node_type")
 			row["uid_0"] = uid0
@@ -708,6 +719,8 @@ func getIntVal(m map[string]interface{}, key string) int {
 		case int64:
 			return int(n)
 		case uint8:
+			return int(n)
+		case uint64:
 			return int(n)
 		case int:
 			return n

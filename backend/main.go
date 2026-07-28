@@ -39,6 +39,7 @@ func main() {
 	chain.AddFlowLogSource(chDS)
 	chain.AddTraceMapSource(chDS)
 	chain.AddTopSource(chDS)
+	chain.AddListSource(chDS)
 
 	// Create the query service (central business logic entry point).
 	enumSvc := enum.NewEnumService(cch)
