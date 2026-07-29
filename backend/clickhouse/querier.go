@@ -1367,6 +1367,11 @@ for _, row := range allData {
 			GetF64(row, "auto_service_id_0"), GetF64(row, "auto_service_type_0"),
 			GetF64(row, "auto_service_id_1"), GetF64(row, "auto_service_type_1"))
 		epInfos := epByPair[pairKey]
+		// Limit to top 5 by total for span_info (matching cloud behavior).
+		if len(epInfos) > 5 {
+			sort.Slice(epInfos, func(i, j int) bool { return epInfos[i].total > epInfos[j].total })
+			epInfos = epInfos[:5]
+		}
 		var endpointsList []interface{}
 		var endpointStats []interface{}
 		for _, ep := range epInfos {
