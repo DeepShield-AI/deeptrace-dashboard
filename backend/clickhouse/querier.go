@@ -1278,7 +1278,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 			// (auto_service kept as-is; IP fallback is done in cloud but requires IP per edge)
 			"_querier_region":           "本地",
 			"observation_point":         agg.obsPoint,
-			"parent_node_infos":         []interface{}(nil),
+			"parent_node_infos":         []interface{}{},
 
 			// Endpoints at node level
 			"endpoints_0":               clientEPsList,
@@ -1303,15 +1303,21 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 			"avg_response_ratio":                 float64(1.0),
 			"inferred_application_type":          nil,
 		}
-		// Null-conversion: empty maps/lists → nil to match cloud format
+		// Null-conversion: empty maps → delete key (cloud omits the key entirely).
 		if m, ok := node["gprocess_ids"].(map[string]interface{}); ok && len(m) == 0 {
-			node["gprocess_ids"] = nil
+			delete(node, "gprocess_ids")
 		}
 		if m, ok := node["trace_ids"].(map[string]interface{}); ok && len(m) == 0 {
-			node["trace_ids"] = nil
+			delete(node, "trace_ids")
 		}
 		if m, ok := node["abnormal_trace_ids"].(map[string]interface{}); ok && len(m) == 0 {
-			node["abnormal_trace_ids"] = nil
+			delete(node, "abnormal_trace_ids")
+		}
+		// When no response data (total=0), set ratio/duration fields to nil (cloud behavior).
+		if rTotal == 0 {
+			node["avg_response_duration"] = nil
+			node["avg_success_ratio"] = nil
+			node["avg_response_ratio"] = nil
 		}
 		// endpoints_0 / endpoint_stats_0 null when no client endpoints
 		if arr, ok := node["endpoints_0"].([]interface{}); ok && len(arr) == 0 {
@@ -1334,8 +1340,9 @@ for _, row := range allData {
 		if sk0 == sk1 {
 			continue
 		}
-		idx1, ok := nodeIdx[sk1]
-		if !ok {
+		idx1, ok1 := nodeIdx[sk1]
+		idx0, ok0 := nodeIdx[sk0]
+		if !ok1 || !ok0 {
 			continue
 		}
 		par := nodes[idx1]["parent_node_infos"].([]interface{})
@@ -1409,16 +1416,20 @@ for _, row := range allData {
 			}
 		}
 
-		// Add trace IDs to the server node's trace_ids (node level uses dict)
-		for _, tid := range traceIDsList {
-			if existing, ok := nodes[idx1]["trace_ids"].(map[string]interface{}); ok {
-				existing[tid.(string)] = map[string]interface{}{}
+		// Add trace IDs to both client and server nodes (node level uses dict).
+		for _, idx := range []int{idx0, idx1} {
+			for _, tid := range traceIDsList {
+				if existing, ok := nodes[idx]["trace_ids"].(map[string]interface{}); ok {
+					existing[tid.(string)] = map[string]interface{}{}
+				}
 			}
 		}
-		// Add abnormal trace IDs to the server node (node level uses dict)
-		for _, tid := range abnormalIDsList {
-			if existing, ok := nodes[idx1]["abnormal_trace_ids"].(map[string]interface{}); ok {
-				existing[tid.(string)] = float64(1)
+		// Add abnormal trace IDs to both client and server nodes.
+		for _, idx := range []int{idx0, idx1} {
+			for _, tid := range abnormalIDsList {
+				if existing, ok := nodes[idx]["abnormal_trace_ids"].(map[string]interface{}); ok {
+					existing[tid.(string)] = float64(1)
+				}
 			}
 		}
 
