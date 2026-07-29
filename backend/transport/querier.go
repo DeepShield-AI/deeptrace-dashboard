@@ -59,6 +59,7 @@ func handleList(srv *query.QuerierService) http.HandlerFunc {
 			writeError(w, "bad request", 400)
 			return
 		}
+		req.NormalizeQuery()
 		result, err := srv.QueryList(r.Context(), &req)
 		if err != nil {
 			log.Printf("⚠️  QueryList error: %v", err)
@@ -118,6 +119,7 @@ func handleTop(srv *query.QuerierService) http.HandlerFunc {
 		if err := json.Unmarshal(body, &req); err != nil {
 			return
 		}
+		req.NormalizeQuery()
 		result, err := srv.QueryTop(r.Context(), &req)
 		if err != nil {
 			log.Printf("⚠️  QueryTop error: %v", err)
@@ -144,6 +146,7 @@ func handleProfile(srv *query.QuerierService) http.HandlerFunc {
 			writeError(w, "bad request", 400)
 			return
 		}
+		req.NormalizeQuery()
 		result, err := srv.QueryTopForProfile(r.Context(), &req)
 		if err != nil {
 			log.Printf("⚠️  Profile error: %v", err)
@@ -245,7 +248,11 @@ func queryTopoFlowMetrics(ch *clickhouse.CHService, req query.QuerierListRequest
 	}
 	resolvedTbl := tbl
 	if !strings.Contains(tbl, ".") {
-		resolvedTbl = tbl + ".1m"
+		if req.DataSource != "" {
+			resolvedTbl = tbl + "." + req.DataSource
+		} else {
+			resolvedTbl = tbl + ".1m"
+		}
 	}
 	fullTable := fmt.Sprintf("`%s`.`%s`", req.Database, resolvedTbl)
 	ts := req.TimeStart

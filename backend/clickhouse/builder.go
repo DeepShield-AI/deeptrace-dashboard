@@ -26,6 +26,7 @@ type QuerierRequest struct {
 	Total     bool             `json:"TOTAL"`
 	DataSource string           `json:"DATA_SOURCE"`
 	Interval   int                `json:"interval"`
+	Fill       string           `json:"fill"`
 }
 
 // QuerierSort holds sort parameters.
@@ -39,6 +40,7 @@ type QuerierSub struct {
 	QueryID string   `json:"QUERY_ID"`
 	Select  string   `json:"SELECT"`
 	Where   string   `json:"WHERE"`
+	Having  string   `json:"HAVING"`
 	Tags    []string `json:"TAGS"`
 	CTags   []string `json:"CTAGS"`
 	STags   []string `json:"STAGS"`
@@ -108,23 +110,120 @@ func IsAggExpr(expr string) bool {
 }
 
 // NormalizeExpr converts a querier expression to ClickHouse SQL.
-func NormalizeExpr(expr string) string {
+
+// normalizeHavingExpr normalizes aggregate expressions in HAVING clause.
+func normalizeHavingExpr(having string) string {
+	result := having
+	havingExprs := map[string]string{
+		"Avg(`server_error_ratio`)": "avg(nullif(server_error, 0) / nullif(request, 0))",
+		"Avg(server_error_ratio)":   "avg(nullif(server_error, 0) / nullif(request, 0))",
+		"Sum(server_error_ratio)":   "sum(nullif(server_error, 0) / nullif(request, 0))",
+		"Avg(`client_error_ratio`)": "avg(nullif(client_error, 0) / nullif(request, 0))",
+		"Avg(client_error_ratio)":   "avg(nullif(client_error, 0) / nullif(request, 0))",
+		"Avg(`error_ratio`)":        "avg(nullif(error, 0) / nullif(request, 0))",
+		"Avg(error_ratio)":          "avg(nullif(error, 0) / nullif(request, 0))",
+		"Avg(`rrt`)":                "avg(rrt_sum / nullif(rrt_count, 0))",
+		"Avg(rrt)":                  "avg(rrt_sum / nullif(rrt_count, 0))",
+	}
+	// Case-insensitive replacement
+	lowerResult := strings.ToLower(result)
+	for expr, chExpr := range havingExprs {
+		lowExpr := strings.ToLower(expr)
+		if strings.Contains(lowerResult, lowExpr) {
+			result = strings.ReplaceAll(result, expr, chExpr)
+			lowerResult = strings.ToLower(result)
+		}
+	}
+	return result
+}
+
+// replaceDSLFunc replaces DeepFlow DSL function calls in expr with ClickHouse equivalents.
+// Handles: PerSecond(...), node_type(...), icon_id(...), Enum(...), newTag(...)
+func replaceDSLFunc(expr string) string {
 	lower := strings.ToLower(expr)
-	if strings.HasPrefix(lower, "newtag(") {
-		return ""
+
+	// PerSecond(x) → (normalized_x)/60.0
+	if idx := strings.Index(lower, "persecond("); idx >= 0 {
+		// Find the matching closing paren.
+		argStart := idx + len("persecond(")
+		argEnd := findMatchingParen(expr, argStart-1)
+		if argEnd > argStart {
+			arg := expr[argStart:argEnd]
+			prefix := expr[:idx]
+			suffix := expr[argEnd+1:]
+			return prefix + "(" + NormalizeExpr(arg) + ")/60.0" + suffix
+		}
 	}
-	if strings.HasPrefix(lower, "persecond(") {
-		inner := expr[len("PerSecond("):len(expr)-1]
-		return fmt.Sprintf("(%s)/60.0", NormalizeExpr(inner))
+	// node_type(x) → x (passthrough)
+	if idx := strings.Index(lower, "node_type("); idx >= 0 {
+		argStart := idx + len("node_type(")
+		argEnd := findMatchingParen(expr, argStart-1)
+		if argEnd > argStart {
+			return expr[:idx] + strings.TrimSpace(expr[argStart:argEnd]) + expr[argEnd+1:]
+		}
 	}
-	if strings.HasPrefix(lower, "node_type(") {
-		return strings.TrimSpace(expr[len("node_type("):len(expr)-1])
+	// icon_id(x) → toInt64(0)
+	if idx := strings.Index(lower, "icon_id("); idx >= 0 {
+		argStart := idx + len("icon_id(")
+		argEnd := findMatchingParen(expr, argStart-1)
+		if argEnd > argStart {
+			return expr[:idx] + "toInt64(0)" + expr[argEnd+1:]
+		}
 	}
-	if strings.HasPrefix(lower, "icon_id(") {
-		return "toInt64(0)"
+	// Enum(x) → x
+	if idx := strings.Index(lower, "enum("); idx >= 0 {
+		argStart := idx + len("enum(")
+		argEnd := findMatchingParen(expr, argStart-1)
+		if argEnd > argStart {
+			return expr[:idx] + strings.TrimSpace(expr[argStart:argEnd]) + expr[argEnd+1:]
+		}
 	}
-	if strings.HasPrefix(lower, "enum(") {
-		return strings.TrimSpace(expr[len("Enum("):len(expr)-1])
+	// newTag(x) → ''
+	if idx := strings.Index(lower, "newtag("); idx >= 0 {
+		argStart := idx + len("newtag(")
+		argEnd := findMatchingParen(expr, argStart-1)
+		if argEnd > argStart {
+			return expr[:idx] + "''" + expr[argEnd+1:]
+		}
+	}
+	return expr
+}
+
+// findMatchingParen returns the index of the ')' that matches the '(' at openIdx.
+func findMatchingParen(s string, openIdx int) int {
+	depth := 0
+	for i := openIdx; i < len(s); i++ {
+		if s[i] == '(' {
+			depth++
+		} else if s[i] == ')' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+func NormalizeExpr(expr string) string {
+	// Strip outer parens so expressions like (x*8) get re-wrapped after normalization.
+	outer := strings.TrimSpace(expr)
+	if strings.HasPrefix(outer, "(") && strings.HasSuffix(outer, ")") {
+		argEnd := findMatchingParen(outer, 0)
+		if argEnd == len(outer)-1 {
+			// Entire expression is wrapped.
+			inner := strings.TrimSpace(outer[1:argEnd])
+			normalized := NormalizeExpr(inner)
+			return "(" + normalized + ")"
+		}
+	}
+
+	// Replace known DSL functions in the expression.
+	expr = replaceDSLFunc(expr)
+
+	lower := strings.ToLower(expr)
+	if lower == "count(`row`)" || lower == "count(row)" {
+		return "count(*)"
 	}
 	if lower == "count(`row`)" || lower == "count(row)" {
 		return "count(*)"
@@ -146,6 +245,9 @@ func NormalizeExpr(expr string) string {
 		"avg(client_error_ratio)":   "avg(nullif(client_error, 0) / nullif(request, 0))",
 		"avg(error_ratio)":          "avg(nullif(error, 0) / nullif(request, 0))",
 		"avg(request)":             "avg(request)",
+		// flow_metrics.network column mappings (DSL names → actual CH columns).
+		"avg(retrans_ratio)":   "avg(retrans_tx)",
+		"avg(zero_win_ratio)":  "avg(zero_win_tx)",
 	}
 	if mapped, ok := metricMaps[noBacktickLower]; ok {
 		return mapped
@@ -197,7 +299,11 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 	resolvedTable := table
 	resolvedDB := req.Database
 	if resolvedDB == "flow_metrics" && !strings.Contains(table, ".") {
-		resolvedTable = table + ".1m"
+		if req.DataSource != "" {
+			resolvedTable = table + "." + req.DataSource
+		} else {
+			resolvedTable = table + ".1m"
+		}
 	}
 
 	fullTable := ""
@@ -244,12 +350,12 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 		"instance_id_0":   "auto_instance_id_0",
 		"instance_id_1":   "auto_instance_id_1",
 	}
-	// For flow_log tables, map _0/_1 suffixed tag names to ID columns.
+	// For flow_log tables, map _0/_1 suffixed tag names to resolved names.
 	if isFlowLog {
-		colMap["auto_service_0"] = "toString(auto_service_id_0)"
-		colMap["auto_service_1"] = "toString(auto_service_id_1)"
-		colMap["auto_instance_0"] = "toString(auto_instance_id_0)"
-		colMap["auto_instance_1"] = "toString(auto_instance_id_1)"
+		colMap["auto_service_0"] = "if(auto_service_type_0 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_0), IPv6NumToString(ip6_0)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_0), toUInt64(auto_service_id_0)), ''))"
+		colMap["auto_service_1"] = "if(auto_service_type_1 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_1), IPv6NumToString(ip6_1)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_1), toUInt64(auto_service_id_1)), ''))"
+		colMap["auto_instance_0"] = "if(auto_instance_type_0 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_0), IPv6NumToString(ip6_0)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_instance_type_0), toUInt64(auto_instance_id_0)), toString(auto_instance_id_0)))"
+		colMap["auto_instance_1"] = "if(auto_instance_type_1 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_1), IPv6NumToString(ip6_1)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_instance_type_1), toUInt64(auto_instance_id_1)), toString(auto_instance_id_1)))"
 		colMap["app_service"] = "app_service"
 	}
 	if isFlowMetrics {
@@ -275,15 +381,30 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 
 		case isTag || (!isAgg && !isFunc):
 			col := strings.Trim(item.Expr, "`")
-			// Apply column name mapping.
-			if mapped, ok := colMap[col]; ok {
+			// Check for node_type, icon_id, enum function calls disguised as tags.
+			if strings.HasPrefix(lower, "node_type(") {
+				inner := strings.TrimSpace(item.Expr[len("node_type("):len(item.Expr)-1])
+				inner = strings.Trim(inner, "\"'")
+				selectParts = append(selectParts, fmt.Sprintf("'%s' AS `%s`", inner, item.Key))
+			} else if strings.HasPrefix(lower, "icon_id(") {
+				selectParts = append(selectParts, fmt.Sprintf("toInt64(-13) AS `%s`", item.Key))
+			} else if strings.HasPrefix(lower, "enum(") {
+				inner := strings.TrimSpace(item.Expr[len("enum("):len(item.Expr)-1])
+				inner = strings.Trim(inner, "\"'")
+				selectParts = append(selectParts, fmt.Sprintf("`%s` AS `%s`", inner, item.Key))
+				groupByParts = append(groupByParts, fmt.Sprintf("`%s`", inner))
+			} else if _, err := fmt.Sscanf(col, "%f", new(float64)); err == nil {
+				// Numeric literal (e.g., -42)
+				selectParts = append(selectParts, fmt.Sprintf("%s AS `%s`", col, item.Key))
+			} else if mapped, ok := colMap[col]; ok {
 				selectParts = append(selectParts, fmt.Sprintf("%s AS `%s`", mapped, item.Key))
 				groupByParts = append(groupByParts, mapped)
+			} else if col == "is_internet_0" || col == "is_internet_1" {
+				selectParts = append(selectParts, fmt.Sprintf("0 AS `%s`", col))
 			} else {
 				selectParts = append(selectParts, fmt.Sprintf("`%s` AS `%s`", col, item.Key))
 				groupByParts = append(groupByParts, fmt.Sprintf("`%s`", col))
 			}
-
 		case isAgg:
 			sqlExpr := expr
 			if isFlowLog {
@@ -312,6 +433,41 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 			} else {
 				selectParts = append(selectParts, fmt.Sprintf("`%s` AS `%s`", col, item.Key))
 				groupByParts = append(groupByParts, fmt.Sprintf("`%s`", col))
+			}
+		}
+	}
+
+	// Auto-add required columns that the cloud backend always returns.
+	// These are expected by the frontend even when not in SELECT/TAGS.
+	if resolvedDB == "flow_metrics" {
+		// auto_service_type_0/1 — needed for node_type/icon_id resolution
+		for _, suffix := range []string{"_0", "_1"} {
+			colName := "auto_service_type" + suffix
+			already := false
+			for _, sp := range selectParts {
+				if strings.Contains(sp, "`"+colName+"`") {
+					already = true
+					break
+				}
+			}
+			if !already && gbSet["auto_service"+suffix] {
+				selectParts = append(selectParts, fmt.Sprintf("`%s` AS `%s`", colName, colName))
+				groupByParts = append(groupByParts, fmt.Sprintf("`%s`", colName))
+			}
+		}
+		// resource_l7_protocol_0/1 — protocol label for topology
+		for _, suffix := range []string{"_0", "_1"} {
+			colName := "resource_l7_protocol" + suffix
+			already := false
+			for _, sp := range selectParts {
+				if strings.Contains(sp, "`"+colName+"`") {
+					already = true
+					break
+				}
+			}
+			if !already && gbSet["auto_service_0"] {
+				selectParts = append(selectParts, fmt.Sprintf("`l7_protocol` AS `%s`", colName))
+				groupByParts = append(groupByParts, "`l7_protocol`")
 			}
 		}
 	}
@@ -377,6 +533,20 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 	if len(groupByParts) > 0 {
 		sql.WriteString(" GROUP BY ")
 		sql.WriteString(strings.Join(groupByParts, ", "))
+	}
+
+	// HAVING clause — normalize aggregate expressions to CH equivalents.
+	if q.Having != "" {
+		cleanHaving := cleanWhereClause(q.Having)
+		cleanHaving = strings.ReplaceAll(cleanHaving, "`ip_0`", "`ip4_0`")
+		cleanHaving = strings.ReplaceAll(cleanHaving, "`ip_1`", "`ip4_1`")
+		cleanHaving = strings.ReplaceAll(cleanHaving, "ip_0", "ip4_0")
+		cleanHaving = strings.ReplaceAll(cleanHaving, "ip_1", "ip4_1")
+		// Normalize aggregate function references in HAVING using NormalizeExpr.
+		// This maps Avg(server_error_ratio) → avg(nullif(server_error, 0) / nullif(request, 0)) etc.
+		normalized := normalizeHavingExpr(cleanHaving)
+		sql.WriteString(" HAVING ")
+		sql.WriteString(normalized)
 	}
 
 	if req.Sort != nil && req.Sort.OrderBy != "" {
