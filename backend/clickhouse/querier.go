@@ -1212,9 +1212,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 				"response_status":      respStat,
 			})
 		}
-		if serverEndpointStats == nil {
-			serverEndpointStats = []interface{}{}
-		}
+		// Keep nil as nil for JSON null (matching cloud behavior).
 		// Limit endpoints to top 5 by total count (matching cloud behavior).
 		sort.Slice(uniqueClientEPs, func(i, j int) bool {
 			ti := float64(0); if s, ok := agg.epStats[uniqueClientEPs[i]]; ok { ti = s.total }
@@ -1246,9 +1244,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 				"response_status":      respStat,
 			})
 		}
-		if clientEndpointStats == nil {
-			clientEndpointStats = []interface{}{}
-		}
+		// Keep nil as nil for JSON null (matching cloud behavior).
 		var serverEPsList []interface{}
 		for _, ep := range uniqueServerEPs {
 			serverEPsList = append(serverEPsList, ep)
@@ -1282,7 +1278,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 			// (auto_service kept as-is; IP fallback is done in cloud but requires IP per edge)
 			"_querier_region":           "本地",
 			"observation_point":         agg.obsPoint,
-			"parent_node_infos":         []interface{}{},
+			"parent_node_infos":         []interface{}(nil),
 
 			// Endpoints at node level
 			"endpoints_0":               clientEPsList,
@@ -1387,9 +1383,7 @@ for _, row := range allData {
 				"response_status":    ep.responseStatus,
 			})
 		}
-		if endpointStats == nil {
-			endpointStats = []interface{}{}
-		}
+		// Keep nil as nil for JSON null (matching cloud behavior).
 
 		// Trace IDs for this edge (from groupArray)
 		traceIDStrs := strList(GetArr(row, "trace_ids_arr"))
