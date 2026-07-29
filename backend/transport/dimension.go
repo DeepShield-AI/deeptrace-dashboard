@@ -76,6 +76,17 @@ func queryDimensionResources(ch *clickhouse.CHService, req dimReq) map[string]in
 	// Extract service ID and type from WHERE clause.
 	// WHERE format: "(auto_service_id_0=X AND auto_service_type_0=Y) OR (...)"
 	svcIDs := extractServiceIDs(req.Queries)
+
+	// If no service IDs found, try extracting IP from WHERE clause.
+	// WHERE format: "(subnet_id_0=0 AND ip_0='1.2.3.4') OR (subnet_id_1=0 AND ip_1='1.2.3.4')"
+	if len(svcIDs) == 0 {
+		ip := extractIPFromWhere(req.Queries)
+		if ip != "" {
+			result["IP_NUM"] = 1
+			result["IPS"] = []string{ip}
+			svcIDs = []string{"0:0"} // placeholder to continue resource queries
+		}
+	}
 	if len(svcIDs) == 0 {
 		return result
 	}
@@ -220,61 +231,97 @@ func extractServiceIDs(queries []struct {
 }) []string {
 	for _, q := range queries {
 		w := q.Where
-		// Pattern: auto_service_id_N=X AND auto_service_type_N=Y
-		idStart := strings.Index(w, "auto_service_id_")
+
+		// Pattern 1: auto_service_id_N=X AND auto_service_type_N=Y (with role suffix)
+		// Pattern 2: auto_service_id=X (without role suffix, e.g. from resource-analysis drawer)
+		idStart := strings.Index(w, "auto_service_id")
 		if idStart < 0 {
 			continue
 		}
 		rest := w[idStart:]
 		var results []string
 
-		// Parse each "auto_service_id_N=X" pattern.
-		for {
-			eqIdx := strings.Index(rest, "=")
-			if eqIdx < 0 {
-				break
-			}
-			// Find end of value (next space, ')', or end of string)
-			endIdx := strings.IndexAny(rest[eqIdx:], " )")
-			idVal := ""
-			if endIdx < 0 {
-				idVal = rest[eqIdx+1:]
-			} else {
-				idVal = rest[eqIdx+1 : eqIdx+endIdx]
-			}
+		// Check which pattern we have.
+		hasRoleSuffix := strings.HasPrefix(rest, "auto_service_id_")
 
-			// Find the corresponding auto_service_type_N=Y
+		// Parse the id value.
+		eqIdx := strings.Index(rest, "=")
+		if eqIdx < 0 {
+			continue
+		}
+		endIdx := strings.IndexAny(rest[eqIdx:], " )`")
+		idVal := ""
+		if endIdx < 0 {
+			idVal = rest[eqIdx+1:]
+		} else {
+			idVal = rest[eqIdx+1 : eqIdx+endIdx]
+		}
+		// Clean: remove backticks and trailing chars.
+		idVal = strings.Trim(idVal, "`' ")
+
+		var typeVal string
+		if hasRoleSuffix {
+			// Find the corresponding auto_service_type_N=Y.
 			typeIdx := strings.Index(rest, "auto_service_type_")
 			if typeIdx < 0 {
-				break
-			}
-			typeRest := rest[typeIdx:]
-			eqIdx2 := strings.Index(typeRest, "=")
-			if eqIdx2 < 0 {
-				break
-			}
-			endIdx2 := strings.IndexAny(typeRest[eqIdx2:], " )")
-			typeVal := ""
-			if endIdx2 < 0 {
-				typeVal = typeRest[eqIdx2+1:]
+				// No type specified — use type from the flow_log table context if available.
+				// Fall back to "255" (IP) as a reasonable default.
+				typeVal = "0"
 			} else {
-				typeVal = typeRest[eqIdx2+1 : eqIdx2+endIdx2]
+				typeRest := rest[typeIdx:]
+				eqIdx2 := strings.Index(typeRest, "=")
+				if eqIdx2 >= 0 {
+					endIdx2 := strings.IndexAny(typeRest[eqIdx2:], " )`")
+					if endIdx2 < 0 {
+						typeVal = typeRest[eqIdx2+1:]
+					} else {
+						typeVal = typeRest[eqIdx2+1 : eqIdx2+endIdx2]
+					}
+					typeVal = strings.Trim(typeVal, "`' ")
+				}
 			}
-			results = append(results, idVal+":"+typeVal)
-
-			// Move past this pair.
-			nextID := strings.Index(rest[eqIdx+endIdx:], "auto_service_id_")
-			if nextID < 0 {
-				break
-			}
-			rest = rest[eqIdx+endIdx+nextID:]
+		} else {
+			// Pattern 2: auto_service_id=X without role suffix.
+			// Without a type, we can't meaningfully resolve resources.
+			// But we should still return the id so the caller can try.
+			typeVal = "0"
 		}
+
+		// Only add if we got a valid parse.
+		if idVal != "" {
+			results = append(results, idVal+":"+typeVal)
+		}
+
 		return results
 	}
 	return nil
 }
 
 // getStrDim safely extracts a string from a map.
+// extractIPFromWhere extracts an IP address from WHERE clause conditions like ip_0='1.2.3.4'.
+func extractIPFromWhere(queries []struct {
+	Where  string `json:"WHERE"`
+	Select string `json:"SELECT"`
+	TOP    int    `json:"TOP"`
+}) string {
+	for _, q := range queries {
+		w := q.Where
+		// Look for ip_0='...' or ip_1='...'
+		for _, prefix := range []string{"ip_0='", "ip_1='"} {
+			idx := strings.Index(w, prefix)
+			if idx < 0 {
+				continue
+			}
+			rest := w[idx+len(prefix):]
+			end := strings.Index(rest, "'")
+			if end > 0 {
+				return rest[:end]
+			}
+		}
+	}
+	return ""
+}
+
 func getStrDim(m map[string]interface{}, key string) string {
 	if v, ok := m[key]; ok && v != nil {
 		if s, ok2 := v.(string); ok2 {
