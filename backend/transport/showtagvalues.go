@@ -392,18 +392,32 @@ func enrichEnumEntries(data []interface{}, tag string) {
 	}
 	q := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.int_enum_map WHERE tag_name='%s'", enumTag)
 	rows, err := chHTTPQuery(q)
-	if err != nil || len(rows) == 0 {
-		return
-	}
-	// Build lookup map: value string → {name_zh, description_zh}.
+
+	// Build lookup map: value string -> {name_zh, description_zh}.
 	type enumInfo struct{ name, desc string }
 	lookup := make(map[string]enumInfo)
-	for _, row := range rows {
-		key := fmt.Sprintf("%v", row["value"])
-		lookup[key] = enumInfo{
-			name: getSVStr(row, "name_zh"),
-			desc: getSVStr(row, "description_zh"),
+
+	if err == nil {
+		for _, row := range rows {
+			key := fmt.Sprintf("%v", row["value"])
+			lookup[key] = enumInfo{
+				name: getSVStr(row, "name_zh"),
+				desc: getSVStr(row, "description_zh"),
+			}
 		}
+	}
+
+	// Fallback: use builtinEnumFallback when CH int_enum_map has no data.
+	if len(lookup) == 0 {
+		if fb, ok := builtinEnumFallback[tag]; ok {
+			for k, v := range fb {
+				lookup[k] = enumInfo{name: v}
+			}
+		}
+	}
+
+	if len(lookup) == 0 {
+		return
 	}
 	// Enrich each data entry by index to modify in place.
 	for i := range data {
@@ -431,9 +445,14 @@ func queryEnumFromFlowTag(tag, like string, limit int) []interface{} {
 	case "protocol":
 		enumTag = "l7_protocol"
 	}
-	// Query int_enum_map for known enum values with descriptions.
+	// Try int_enum_map first.
 	q := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.int_enum_map WHERE tag_name='%s' ORDER BY toUInt64(value)", enumTag)
 	rows, err := chHTTPQuery(q)
+	// If int_enum_map has no data, try string_enum_map (for tags like event_type).
+	if err != nil || len(rows) == 0 {
+		q2 := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.string_enum_map WHERE tag_name='%s' ORDER BY value", enumTag)
+		rows, err = chHTTPQuery(q2)
+	}
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
@@ -479,6 +498,13 @@ var builtinEnumFallback = map[string]map[string]string{
 	"event_type": {
 		"read":      "读",
 		"write":     "写",
+	},
+	"observation_point": {
+		"c": "客户端网卡", "s": "服务端网卡",
+		"c-p": "客户侧网络", "s-p": "服务侧网络",
+		"c-app": "客户端应用", "s-app": "服务端应用",
+		"app": "应用", "rest": "其他",
+		"c-gw": "客户端网关", "s-gw": "服务端网关",
 	},
 }
 
@@ -657,8 +683,16 @@ func resolveColumnName(db, tbl, tag string) string {
 		"pod_cluster_id":   "pod_cluster_id",
 		"pod_group_id":     "pod_group_id",
 		"pod_ns_id":        "pod_ns_id",
-		"event_type":       "l7_protocol",
-		"event_desc":       "request_resource",
+	}
+
+	// flow_log-specific column mappings (event_type→l7_protocol only for flow_log).
+	if db == "flow_log" {
+		switch tag {
+		case "event_type":
+			return "l7_protocol"
+		case "event_desc":
+			return "request_resource"
+		}
 	}
 
 	if mapped, ok := colMap[tag]; ok {
