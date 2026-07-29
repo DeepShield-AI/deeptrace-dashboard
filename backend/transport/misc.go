@@ -6,10 +6,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"deeptrace-backend/client"
+	"deeptrace-backend/engine"
 	"deeptrace-backend/query"
 	"deeptrace-backend/query/flowlog"
 )
@@ -63,6 +66,7 @@ func RegisterMisc(mux *http.ServeMux, deps *Dependencies) {
 	mux.HandleFunc("/api/df-web-composer/api/querier/fast_list", handleFastList(deps))
 	mux.HandleFunc("/api/df-web-composer/api/service_topo/entry_path_overview", handleServiceOverview())
 	mux.HandleFunc("/api/df-web-composer/api/service_topo/", handleServiceTopo())
+	mux.HandleFunc("/api/df-web-composer/api/l7_flowlog_analysis/duration_detail_with_max/", handleDurationDetail(deps))
 	mux.HandleFunc("/api/df-web-composer/", handleComposerFallback(deps))
 }
 
@@ -135,23 +139,24 @@ type fastListRequest struct {
 // When conditions compare virtual columns to numbers, ZT fails with type mismatches
 // (String vs UInt16). Route to the physical ID column for numeric comparisons.
 var virtualColumnMap = map[string]string{
-	"auto_service":  "auto_service_id",
-	"auto_instance": "auto_instance_id",
-	"chost":         "l3_device_id",
-	"host":          "l3_device_id",
-	"vpc":           "epc_id",
-	"pod_service":   "pod_service_id",
-	"pod_group":     "pod_group_id",
-	"pod_cluster":   "pod_cluster_id",
-	"pod_ns":        "pod_ns_id",
-	"pod_node":      "pod_node_id",
-	"subnet":        "subnet_id",
-	"router":        "router_id",
+	"auto_service":      "auto_service_id",
+	"auto_instance":     "auto_instance_id",
+	"auto_service_type": "auto_service_type",
+	"chost":             "l3_device_id",
+	"host":              "l3_device_id",
+	"vpc":               "epc_id",
+	"pod_service":       "pod_service_id",
+	"pod_group":         "pod_group_id",
+	"pod_cluster":       "pod_cluster_id",
+	"pod_ns":            "pod_ns_id",
+	"pod_node":          "pod_node_id",
+	"subnet":            "subnet_id",
+	"router":            "router_id",
 }
 
 // flattenFastListConditions recursively extracts leaf conditions from a nested
 // AND/OR condition tree (sent by the frontend in QuerierJs format).
-func flattenFastListConditions(conds []interface{}) []string {
+func flattenFastListConditions(conds []interface{}, db string) []string {
 	var result []string
 	for _, c := range conds {
 		m, ok := c.(map[string]interface{})
@@ -171,6 +176,10 @@ func flattenFastListConditions(conds []interface{}) []string {
 			if physicalCol, mapped := virtualColumnMap[col]; mapped {
 				if _, isNum := val.(float64); isNum {
 					col = physicalCol
+					// For flow_log, resource columns use _0/_1 suffix.
+					if db == "flow_log" {
+						col += "_0"
+					}
 				}
 			}
 
@@ -188,7 +197,7 @@ func flattenFastListConditions(conds []interface{}) []string {
 		// Branch condition: has "val" array (nested children)
 		if val, hasVal := m["val"]; hasVal {
 			if children, ok := val.([]interface{}); ok {
-				result = append(result, flattenFastListConditions(children)...)
+				result = append(result, flattenFastListConditions(children, db)...)
 			}
 		}
 	}
@@ -267,7 +276,7 @@ func queryFastList(deps *Dependencies, r *http.Request, body []byte, debug bool)
 	var extras []string
 	if req.Where != nil {
 		for _, rs := range req.Where.ResourceSets {
-			extras = append(extras, flattenFastListConditions(rs.Condition)...)
+			extras = append(extras, flattenFastListConditions(rs.Condition, db)...)
 		}
 	}
 	limit := req.Limit
@@ -374,39 +383,123 @@ func queryFastList(deps *Dependencies, r *http.Request, body []byte, debug bool)
 
 
 // chQueryFastList queries ClickHouse directly for fast_list when ZT doesn't support the query.
+// normalizeFastListSelect strips DeepFlow DSL functions for CH compatibility.
+// E.g., Enum(observation_point) → observation_point, node_type(x) → x.
+func normalizeFastListSelect(sel string) string {
+	result := sel
+	for _, fn := range []string{"Enum", "node_type", "icon_id", "newTag"} {
+		lower := strings.ToLower(result)
+		idx := strings.Index(lower, strings.ToLower(fn)+"(")
+		for idx >= 0 {
+			end := idx + len(fn) + 1
+			depth := 1
+			for end < len(result) && depth > 0 {
+				if result[end] == '(' { depth++ }
+				if result[end] == ')' { depth-- }
+				end++
+			}
+			inner := strings.TrimSpace(result[idx+len(fn)+1 : end-1])
+			result = result[:idx] + inner + result[end:]
+			lower = strings.ToLower(result)
+			idx = strings.Index(lower, strings.ToLower(fn)+"(")
+		}
+	}
+	return result
+}
+
 func chQueryFastList(deps *Dependencies, db, tbl, selStr string, extras []string,
 	timeStart, timeEnd int64, limit, offset int) []interface{} {
 	if deps.CH == nil || !deps.CH.Enabled() {
 		return nil
 	}
 	// Build a ClickHouse-compatible SQL. Use count(*) to avoid ZT's Count(row) limitation.
-	sel := fmt.Sprintf("%s, count(*) AS count_row", selStr)
-	groupBy := selStr
-	sql := query.BuildBaseSQL(sel, tbl, extras, timeStart, timeEnd,
-		groupBy, "count_row", "DESC", limit, offset)
+	// Strip DeepFlow DSL functions (Enum, node_type, etc.) for CH compatibility.
+	chSel := normalizeFastListSelect(selStr)
+	sel := fmt.Sprintf("%s, count(*) AS count_row", chSel)
+	groupBy := chSel
+	// Build SQL with `db`.`table` prefix for ClickHouse.
+	fullTable := fmt.Sprintf("`%s`.`%s`", db, tbl)
+	var clauses []string
+	if timeStart > 0 { clauses = append(clauses, fmt.Sprintf("time >= %d", timeStart)) }
+	if timeEnd > 0 { clauses = append(clauses, fmt.Sprintf("time <= %d", timeEnd)) }
+	// Strip ZT-only virtual columns not present in CH (e.g., role).
+	var chExtras []string
+	for _, e := range extras {
+		skip := false
+		for _, vcol := range []string{"role"} {
+			if strings.Contains(e, "`"+vcol+"`") { skip = true; break }
+		}
+		if !skip { chExtras = append(chExtras, e) }
+	}
+	clauses = append(clauses, chExtras...)
+	whereClause := ""
+	if len(clauses) > 0 { whereClause = " WHERE " + strings.Join(clauses, " AND ") }
+	sql := fmt.Sprintf("SELECT %s FROM %s%s GROUP BY %s ORDER BY `count_row` DESC LIMIT %d", sel, fullTable, whereClause, groupBy, limit)
+	if offset > 0 { sql += fmt.Sprintf(" OFFSET %d", offset) }
 	log.Printf("🔍 CH fast_list fallback: db=%s sql=%s", db, sql)
 
-	// Execute via ClickHouse HTTP (chHTTPQuery is in showmetrics.go).
-	// Replace backtick table references with proper quoting.
 	rows, err := chHTTPQuery(sql)
 	if err != nil {
 		log.Printf("⚠️  CH fast_list error: %v", err)
 		return nil
 	}
 
+	// Detect Enum(column) patterns in original SELECT for post-translation.
+	var enumCols []string
+	enumRe := regexp.MustCompile(`Enum\(([^)]+)\)`)
+	for _, match := range enumRe.FindAllStringSubmatch(selStr, -1) {
+		enumCols = append(enumCols, strings.TrimSpace(match[1]))
+	}
+
+	// Load int_enum_map for translation.
+	enumCache := map[string]map[string]string{}
+	for _, col := range enumCols {
+		eRes, eErr := chHTTPQuery(fmt.Sprintf("SELECT toString(value), name_zh FROM flow_tag.int_enum_map WHERE tag_name='%s'", col))
+		m := map[string]string{}
+		if eErr == nil {
+			for _, er := range eRes {
+				k := fmt.Sprintf("%v", er["toString(value)"])
+				v := getSVStr(er, "name_zh")
+				m[k] = v
+			}
+		}
+		if len(m) == 0 {
+			if fb, ok := builtinEnumFallback[col]; ok {
+				m = fb
+			}
+		}
+		enumCache[col] = m
+	}
+
 	result := make([]interface{}, 0, len(rows))
 	for _, row := range rows {
 		r := make(map[string]interface{})
 		for k, v := range row {
-			// Translate Enum(column) display names where possible.
-			if strings.HasPrefix(k, "Enum(") {
-				if s, ok := v.(string); ok {
-					if cn := flowlog.EnumZHCN(s); cn != "" {
-						v = cn
+			r[k] = v
+		}
+		// Add Enum(column) display name columns.
+		for _, ec := range enumCols {
+			enumKey := "Enum(" + ec + ")"
+			if _, exists := r[enumKey]; !exists {
+				if raw, ok := r[ec]; ok {
+					rawStr := fmt.Sprintf("%v", raw)
+					if m, ok := enumCache[ec]; ok {
+						if display, ok2 := m[rawStr]; ok2 {
+							r[enumKey] = display
+						} else if f, err := strconv.ParseFloat(rawStr, 64); err == nil {
+							if display, ok2 := m[fmt.Sprintf("%.0f", f)]; ok2 {
+								r[enumKey] = display
+							} else {
+								r[enumKey] = raw
+							}
+						} else {
+							r[enumKey] = raw
+						}
+					} else {
+						r[enumKey] = raw
 					}
 				}
 			}
-			r[k] = v
 		}
 		r["_querier_region"] = "本地"
 		result = append(result, r)
@@ -745,6 +838,180 @@ func handleServiceTopo() http.HandlerFunc {
 	}
 }
 
+// durationDetailRequest is the request body for l7_flowlog_analysis/duration_detail_with_max.
+type durationDetailRequest struct {
+	TimeStart int64     `json:"time_start"`
+	TimeEnd   int64     `json:"time_end"`
+	Region    string    `json:"region"`
+	Offset    int       `json:"offset"`
+	Limit     int       `json:"limit"`
+	GroupBy   []string  `json:"group_by"`
+	Where     *struct {
+		Paths        []map[string]string `json:"paths"`
+		ResourceSets []struct {
+			ID        string        `json:"id"`
+			Condition []interface{} `json:"condition"`
+			GroupBy   []string      `json:"groupBy"`
+		} `json:"resourceSets"`
+	} `json:"where"`
+}
+
+func handleDurationDetail(deps *Dependencies) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var req durationDetailRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeError(w, "bad request", 400)
+			return
+		}
+		if req.Limit <= 0 { req.Limit = 20 }
+		if req.TimeStart == 0 || req.TimeEnd == 0 {
+			writeSuccess(w, map[string]interface{}{"result": []interface{}{}})
+			return
+		}
+		log.Printf("📊 duration_detail: time=%d-%d limit=%d", req.TimeStart, req.TimeEnd, req.Limit)
+
+		var tagConditions, metricConditions []string
+		var allGroupBys []string
+		seenGroupBy := map[string]bool{}
+
+		if req.Where != nil {
+			for _, rs := range req.Where.ResourceSets {
+				conds := flattenFastListConditions(rs.Condition, "flow_log")
+				for _, c := range conds {
+					if strings.Contains(c, "response_duration") || strings.Contains(c, "request") {
+						metricConditions = append(metricConditions, c)
+					} else {
+						// Strip ZT-only virtual columns not present in CH (e.g., role).
+						skip := false
+						for _, vcol := range []string{"role", "is_internet"} {
+							if strings.Contains(c, "`"+vcol+"`") { skip = true; break }
+						}
+						if !skip {
+							tagConditions = append(tagConditions, c)
+						}
+					}
+				}
+				for _, gb := range rs.GroupBy {
+					if !seenGroupBy[gb] { allGroupBys = append(allGroupBys, gb); seenGroupBy[gb] = true }
+				}
+			}
+		}
+		for _, gb := range req.GroupBy {
+			if !seenGroupBy[gb] { allGroupBys = append(allGroupBys, gb); seenGroupBy[gb] = true }
+		}
+
+		// Strip ZT-only virtual columns not present in CH.
+		ztVirtual := map[string]bool{"is_internet": true, "role": true}
+		var filteredGB []string
+		for _, gb := range allGroupBys {
+			if !ztVirtual[gb] { filteredGB = append(filteredGB, gb) }
+		}
+		allGroupBys = filteredGB
+
+		tagColMap := map[string]string{
+			"auto_service": "app_service", "auto_instance": "app_instance",
+			"observation_point": "observation_point",
+		}
+		var tagCols, groupParts []string
+		for _, gb := range allGroupBys {
+			mapped := gb
+			if m, ok := tagColMap[gb]; ok { mapped = m }
+			tagCols = append(tagCols, fmt.Sprintf("`%s` AS `%s`", mapped, gb))
+			groupParts = append(groupParts, fmt.Sprintf("`%s`", mapped))
+		}
+		for _, side := range []string{"_0", "_1"} {
+			for _, tag := range []string{"auto_service_id", "auto_service_type"} {
+				col := tag + side
+				if !seenGroupBy[col] {
+					tagCols = append(tagCols, fmt.Sprintf("`%s` AS `%s`", col, col))
+					groupParts = append(groupParts, fmt.Sprintf("`%s`", col))
+				}
+			}
+			col := "auto_service" + side
+			if !seenGroupBy[col] {
+				tagCols = append(tagCols, "`app_service` AS `"+col+"`")
+				groupParts = append(groupParts, "`app_service`")
+			}
+		}
+
+		metricSelects := []string{
+			"count(*) AS `Sum(请求)`",
+			"avg(response_duration) AS `Avg(响应时延)`",
+			"countIf(response_status != 2) / count(*) * 100 AS `Avg(响应比例)`",
+			"countIf(response_status = 0) / count(*) * 100 AS `Avg(正常比例)`",
+		}
+
+		var wheres []string
+		if req.TimeStart > 0 { wheres = append(wheres, fmt.Sprintf("time >= %d", req.TimeStart)) }
+		if req.TimeEnd > 0 { wheres = append(wheres, fmt.Sprintf("time <= %d", req.TimeEnd)) }
+		wheres = append(wheres, tagConditions...)
+		wheres = append(wheres, metricConditions...)
+		whereStr := ""
+		if len(wheres) > 0 { whereStr = " WHERE " + strings.Join(wheres, " AND ") }
+
+		fullTable := "`flow_log`.`l7_flow_log`"
+		allSel := append(tagCols, metricSelects...)
+		sql := fmt.Sprintf("SELECT %s FROM %s%s GROUP BY %s ORDER BY `Sum(请求)` DESC LIMIT %d",
+			strings.Join(allSel, ", "), fullTable, whereStr, strings.Join(groupParts, ", "), req.Limit)
+		if req.Offset > 0 { sql += fmt.Sprintf(" OFFSET %d", req.Offset) }
+		log.Printf("📊 duration_detail SQL: %s", sql)
+
+		rows, err := chHTTPQuery(sql)
+		if err != nil {
+			log.Printf("⚠️ duration_detail CH error: %v", err)
+			writeSuccess(w, map[string]interface{}{"result": []interface{}{}})
+			return
+		}
+
+		result := make([]map[string]interface{}, 0, len(rows))
+		for _, row := range rows {
+			r := make(map[string]interface{})
+			r["query_id"] = "R1-R2"
+			for k, v := range row { r[k] = v }
+			for _, prefix := range []string{"client_", "server_"} {
+				typeCol := "auto_service_type_0"
+				iconKey, nodeKey := prefix+"icon_id", prefix+"node_type"
+				if prefix == "server_" { typeCol = "auto_service_type_1" }
+				if _, exists := r[nodeKey]; !exists {
+					if tv, ok := r[typeCol]; ok {
+						if t, ok2 := toInt(tv); ok2 {
+							r[nodeKey] = engine.NodeTypeFor(t)
+							r[iconKey] = engine.IconFor(t)
+						}
+					}
+				}
+			}
+			r["_querier_region"] = "本地"
+			if _, exists := r["Enum(observation_point)"]; !exists {
+				if op, ok := r["observation_point"]; ok {
+					if fb, found := builtinEnumFallback["observation_point"]; found {
+						if display, ok2 := fb[fmt.Sprintf("%v", op)]; ok2 {
+							r["Enum(observation_point)"] = display
+						} else { r["Enum(observation_point)"] = op }
+					} else { r["Enum(observation_point)"] = op }
+				}
+			}
+			result = append(result, r)
+		}
+
+		var maxRequest, maxDuration map[string]interface{}
+		var maxReqVal, maxDurVal float64
+		for _, r := range result {
+			if v, ok := toFloat(r["Sum(请求)"]); ok && (maxRequest == nil || v > maxReqVal) {
+				maxRequest, maxReqVal = r, v
+			}
+			if v, ok := toFloat(r["Avg(响应时延)"]); ok && (maxDuration == nil || v > maxDurVal) {
+				maxDuration, maxDurVal = r, v
+			}
+		}
+
+		resp := map[string]interface{}{"result": result, "maxRequest": maxRequest, "maxResponseDuration": maxDuration}
+		writeSuccess(w, resp)
+	}
+}
+
+
 func handleComposerFallback(deps *Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if checkCache(w, deps, r.Method, r.URL.RequestURI()) { return }
@@ -758,4 +1025,38 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// toFloat safely converts a value to float64.
+func toFloat(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	}
+	return 0, false
+}
+
+// toInt safely converts a value to int.
+func toInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case float32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case uint64:
+		return int(n), true
+	case int:
+		return n, true
+	}
+	return 0, false
 }

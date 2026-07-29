@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 
-	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/query"
 )
 
@@ -33,50 +32,51 @@ func handleTraceMap(srv *query.QuerierService) http.HandlerFunc {
 		// Parse cloud-format request: {time_start, time_end, query_condition}
 		var tReq traceMapRequest
 		if err := json.Unmarshal(body, &tReq); err != nil {
-			result := &query.TraceMapResult{
-				NodeData: []map[string]interface{}{},
-				ProgressInfo: map[string]interface{}{
-					"total_traces_count":      0,
-					"calculated_traces_count": 0,
-				},
-			}
-			writeTraceMap(w, result)
+			writeTraceMap(w, emptyTraceMapResult())
 			return
 		}
 
-		// Query ClickHouse directly (bypass chain; only source is CH).
-		var result *clickhouse.QueryTraceMapResult
+		// Path 1: Try ClickHouse directly (fast path, best format).
 		if srv.CH != nil && srv.CH.Enabled() {
-			result, err = srv.CH.QueryTraceMap(r.Context(), tReq.TimeStart, tReq.TimeEnd, tReq.QueryCondition)
-			if err != nil {
-				log.Printf("⚠️  TraceMap CH error: %v", err)
+			chResult, chErr := srv.CH.QueryTraceMap(r.Context(), tReq.TimeStart, tReq.TimeEnd, tReq.QueryCondition)
+			if chErr != nil {
+				log.Printf("⚠️  TraceMap CH error: %v", chErr)
+			}
+			if chResult != nil && len(chResult.Data) > 0 {
+				writeTraceMap(w, &query.TraceMapResult{
+					NodeData: chResult.Data,
+					ProgressInfo: map[string]interface{}{
+						"total_traces_count":      chResult.TotalTraces,
+						"calculated_traces_count": chResult.CalculatedTraces,
+					},
+				})
+				return
 			}
 		}
 
-		if result == nil || len(result.Data) == 0 {
-			writeTraceMap(w, &query.TraceMapResult{
-				NodeData: []map[string]interface{}{},
-				ProgressInfo: map[string]interface{}{
-					"total_traces_count":      0,
-					"calculated_traces_count": 0,
-				},
-			})
-			return
-		}
-
-		// Add region and progress info.
-		for _, node := range result.Data {
-			if _, ok := node["_querier_region"]; !ok {
-				node["_querier_region"] = "本地"
+		// Path 2: Try DataSourceChain (cache → mock fallback).
+		if srv.Chain != nil {
+			chainReq := &query.QuerierListRequest{
+				TimeStart: tReq.TimeStart,
+				TimeEnd:   tReq.TimeEnd,
+			}
+			chainResult, chainErr := srv.Chain.QueryTraceMap(r.Context(), chainReq)
+			if chainErr == nil && chainResult != nil && len(chainResult.NodeData) > 0 {
+				writeTraceMap(w, chainResult)
+				return
 			}
 		}
 
-		writeTraceMap(w, &query.TraceMapResult{
-			NodeData: result.Data,
-			ProgressInfo: map[string]interface{}{
-				"total_traces_count":      result.TotalTraces,
-				"calculated_traces_count": result.CalculatedTraces,
-			},
-		})
+		writeTraceMap(w, emptyTraceMapResult())
+	}
+}
+
+func emptyTraceMapResult() *query.TraceMapResult {
+	return &query.TraceMapResult{
+		NodeData: []map[string]interface{}{},
+		ProgressInfo: map[string]interface{}{
+			"total_traces_count":      0,
+			"calculated_traces_count": 0,
+		},
 	}
 }

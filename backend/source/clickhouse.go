@@ -3,20 +3,30 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log"
+	"strings"
 
 	"deeptrace-backend/clickhouse"
-	"log"
+	"deeptrace-backend/enum"
+	"deeptrace-backend/engine"
 	"deeptrace-backend/query"
 )
 
 // CHDataSource wraps CHService as a DataSource for the priority chain.
 type CHDataSource struct {
-	ch *clickhouse.CHService
+	ch   *clickhouse.CHService
+	enum *enum.EnumService
 }
 
 // NewCHDataSource creates a ClickHouse-backed data source.
 func NewCHDataSource(ch *clickhouse.CHService) *CHDataSource {
 	return &CHDataSource{ch: ch}
+}
+
+// SetEnumService sets the enum service for display name translation.
+func (d *CHDataSource) SetEnumService(e *enum.EnumService) {
+	d.enum = e
 }
 
 func (d *CHDataSource) Name() string { return "ClickHouse" }
@@ -37,6 +47,7 @@ func toCHRequest(req *query.QuerierListRequest) *clickhouse.QuerierRequest {
 		TimeStart: req.TimeStart,
 		TimeEnd:   req.TimeEnd,
 		Interval:   req.Interval,
+		Fill:       req.Fill,
 		DataSource: req.DataSource,
 	}
 	for _, q := range req.Queries {
@@ -44,6 +55,7 @@ func toCHRequest(req *query.QuerierListRequest) *clickhouse.QuerierRequest {
 			QueryID: q.QueryID,
 			Select:  q.Select,
 			Where:   q.Where,
+			Having:  q.Having,
 			Tags:    q.Tags,
 			Metrics: q.Metrics,
 			GroupBy: q.GroupBy,
@@ -60,15 +72,17 @@ func (d *CHDataSource) QueryList(ctx context.Context, req *query.QuerierListRequ
 	chReq := toCHRequest(req)
 	result, err := d.ch.QueryList(ctx, chReq)
 	if err != nil {
+		log.Printf("CH QueryList error: %v", err)
 		return nil, err
 	}
 	if result == nil || len(result.Data) == 0 {
 		return nil, nil
 	}
 	addRegion(result.Data)
+	enrichListResults(result.Data, d.enum)
 	return &query.Result{
 		Data:   result.Data,
-		Count:  len(result.Data),
+		Count:  result.Count,
 		Fields: result.Fields,
 		Type:   "Application_Detail_List",
 	}, nil
@@ -157,6 +171,114 @@ func addRegion(data []map[string]interface{}) {
 			row["_querier_region"] = "本地"
 		}
 	}
+}
+
+// enrichListResults post-processes CH List results to fill ZT-resolved fields.
+// 1. Maps auto_service_type → node_type/icon_id for client/server sides.
+// 2. Translates enum display names via int_enum_map when available.
+func enrichListResults(data []map[string]interface{}, enumSvc *enum.EnumService) {
+	if len(data) == 0 {
+		return
+	}
+
+	for _, row := range data {
+		// Resolve node_type and icon_id from auto_service_type.
+		for _, side := range []string{"client_", "server_"} {
+			typeKey := ""
+			if side == "client_" {
+				typeKey = "auto_service_type_0"
+			} else {
+				typeKey = "auto_service_type_1"
+			}
+			if typeVal, ok := row[typeKey]; ok {
+				if t, ok2 := toInt(typeVal); ok2 {
+					// Fill node_type if it's a raw literal (starts with "auto_service").
+					nodeKey := side + "node_type"
+					if nv, exists := row[nodeKey]; exists {
+						if ns, ok3 := nv.(string); ok3 && (strings.HasPrefix(ns, "auto_service_") || ns == "_") {
+							row[nodeKey] = engine.NodeTypeFor(t)
+						}
+					}
+					// Fill icon_id if still default -13/0.
+					iconKey := side + "icon_id"
+					if iv, exists := row[iconKey]; exists {
+						if f, ok3 := toFloat(iv); ok3 && (f == -13 || f == 0) {
+							row[iconKey] = engine.IconFor(t)
+						}
+					}
+				}
+			}
+		}
+
+		// Translate Enum() columns using EnumService.
+		if enumSvc != nil {
+			for k := range row {
+				if strings.HasPrefix(k, "Enum(") {
+					inner := strings.TrimPrefix(k, "Enum(")
+					inner = strings.TrimSuffix(inner, ")")
+					inner = strings.TrimSpace(inner)
+					if raw, ok := row[k].(float64); ok {
+						row[k] = enumSvc.GetDisplay(inner, int64(raw))
+					} else if raw, ok := row[k].(string); ok {
+						row[k] = enumSvc.GetDisplay(inner, raw)
+					}
+				}
+			}
+
+			// Translate resource_l7_protocol_0/1 from numeric to display name.
+			for _, pk := range []string{"resource_l7_protocol_0", "resource_l7_protocol_1"} {
+				if raw, ok := row[pk]; ok {
+					if f, ok2 := toFloat(raw); ok2 {
+						row[pk] = enumSvc.GetDisplay("l7_protocol", fmt.Sprintf("%.0f", f))
+					} else if s, ok2 := raw.(string); ok2 {
+						row[pk] = enumSvc.GetDisplay("l7_protocol", s)
+					}
+				}
+			}
+		}
+	}
+}
+
+// toFloat safely converts a value to float64.
+func toFloat(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+// toInt safely converts a value to int.
+func toInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case float32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case uint64:
+		return int(n), true
+	case int:
+		return n, true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return int(f), true
+		}
+	}
+	return 0, false
 }
 
 // Ensure interface compliance.

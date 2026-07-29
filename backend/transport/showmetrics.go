@@ -2,8 +2,10 @@ package transport
 
 import (
 	"context"
+	"deeptrace-backend/query"
 	"encoding/json"
 	"fmt"
+	"os"
 	"io"
 	"log"
 	"net/http"
@@ -48,18 +50,39 @@ func handleShowMetrics(deps *Dependencies) http.HandlerFunc {
 		})
 	}
 
-		// 1. Try cache first.
-		if deps.Cache != nil {
-			if cached := deps.Cache.FindWithBody(r.Method, r.URL.RequestURI(), bodyStr); cached != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.Write(cached)
-				return
+		// Collect metrics from multiple sources and merge for best coverage.
+		var mergedMetrics []interface{}
+		seen := map[string]bool{}
+
+		// 1. Try deepflow-server (ZT) — returns virtual tags and metrics.
+		if deps.Querier != nil && deps.Querier.Zerotrace != nil {
+			result, err := query.QueryShowMetrics(deps.Querier.Zerotrace, bodyStr)
+			if err == nil && result != nil {
+				for _, m := range result.Data {
+				key := fmt.Sprintf("%s.%s.%s", db, tbl, m["name"])
+				if !seen[key] {
+					seen[key] = true
+					mergedMetrics = append(mergedMetrics, m)
+				}
+			}
+		}
+		}
+
+		// 2. Try ClickHouse HTTP for column metadata (fills gaps ZT misses).
+		if chMetrics := queryShowMetricsCH(db, tbl); chMetrics != nil {
+			for _, m := range chMetrics {
+				if mm, ok := m.(map[string]interface{}); ok {
+					key := fmt.Sprintf("%s.%s.%s", db, tbl, mm["name"])
+					if !seen[key] {
+						seen[key] = true
+						mergedMetrics = append(mergedMetrics, mm)
+					}
+				}
 			}
 		}
 
-		// 2. Try ClickHouse HTTP (port 8123) for column metadata.
-		if metrics := queryShowMetricsCH(db, tbl); metrics != nil {
-			writeShowMetrics(w, metrics)
+		if len(mergedMetrics) > 0 {
+			writeShowMetrics(w, mergedMetrics)
 			return
 		}
 
@@ -72,7 +95,19 @@ func handleShowMetrics(deps *Dependencies) http.HandlerFunc {
 // ClickHouse HTTP query (port 8123)
 // ---------------------------------------------------------------------------
 
-const chHost = "http://localhost:8123"
+var chHost = getCHHTTPHost()
+
+func getCHHTTPHost() string {
+	host := os.Getenv("CLICKHOUSE_HOST")
+	if host == "" {
+		host = "localhost"
+	}
+	port := os.Getenv("CLICKHOUSE_HTTP_PORT")
+	if port == "" {
+		port = "8123"
+	}
+	return "http://" + host + ":" + port
+}
 
 // chHTTPQuery runs a ClickHouse SQL query via HTTP and returns the parsed data.
 func chHTTPQuery(query string) ([]map[string]interface{}, error) {
@@ -109,12 +144,25 @@ func chHTTPQuery(query string) ([]map[string]interface{}, error) {
 // ---------------------------------------------------------------------------
 
 // queryShowMetricsCH builds the ShowMetrics response by querying ClickHouse.
+// For flow_metrics database, appends ".1m" suffix if no results with bare table name.
 // Returns nil if ClickHouse is unavailable.
 func queryShowMetricsCH(database, table string) []interface{} {
-	query := fmt.Sprintf("SELECT name, type, comment FROM system.columns WHERE database='%s' AND table='%s' ORDER BY position", database, table)
-	rows, err := chHTTPQuery(query)
-	if err != nil {
-		log.Printf("⚠️  ShowMetrics CH query failed: %v", err)
+	// Try with table name first; for flow_metrics, try with .1m suffix.
+	tableNames := []string{table}
+	if database == "flow_metrics" && !strings.Contains(table, ".") {
+		tableNames = []string{table + ".1m", table}
+	}
+	var rows []map[string]interface{}
+	var lastErr error
+	for _, tn := range tableNames {
+		query := fmt.Sprintf("SELECT name, type, comment FROM system.columns WHERE database='%s' AND table='%s' ORDER BY position", database, tn)
+		rows, lastErr = chHTTPQuery(query)
+		if lastErr == nil && len(rows) > 0 {
+			break
+		}
+	}
+	if lastErr != nil {
+		log.Printf("⚠️  ShowMetrics CH query failed: %v", lastErr)
 		return nil
 	}
 	if len(rows) == 0 {
@@ -187,10 +235,12 @@ func queryShowMetricsCH(database, table string) []interface{} {
 			isTag = true
 		case strings.HasSuffix(lowName, "_type") || strings.HasSuffix(lowName, "_type_0") || strings.HasSuffix(lowName, "_type_1"):
 			isTag = true
-		case strings.HasSuffix(lowName, "_0") && database == "flow_log":
-			isTag = true
-		case strings.HasSuffix(lowName, "_1") && database == "flow_log":
-			isTag = true
+		case strings.HasSuffix(lowName, "_0") || strings.HasSuffix(lowName, "_1"):
+			// All _0/_1 suffix columns are resource tags (client/server side).
+			// Skip internal raw columns like ip4_0, ip6_0.
+			if !strings.HasPrefix(lowName, "ip4_") && !strings.HasPrefix(lowName, "ip6_") {
+				isTag = true
+			}
 		case strings.HasSuffix(lowName, "_id_0") || strings.HasSuffix(lowName, "_id_1"):
 			isTag = true
 		case strings.HasSuffix(lowName, "_source"):
@@ -250,6 +300,8 @@ func queryShowMetricsCH(database, table string) []interface{} {
 			return 6, "Tag", false, ""
 		case isNumeric:
 			switch {
+			case strings.Contains(lowName, "rrt") || strings.Contains(lowName, "rtt"):
+				return 3, "Delay", false, "us"
 			case strings.Contains(lowName, "duration") || strings.Contains(lowName, "delay"):
 				return 3, "Delay", false, "us"
 			case strings.Contains(lowName, "error") || strings.Contains(lowName, "exception"):
@@ -269,11 +321,31 @@ func queryShowMetricsCH(database, table string) []interface{} {
 		name := c.Name
 
 		// Skip internal columns.
-		if name == "_id" || name == "team_id" {
+		if name == "_id" || name == "team_id" || name == "_tid" || name == "time" || name == "is_key_service" || name == "agent_id" {
+			continue
+		}
+		// Skip raw device/epc columns (internal CH implementation).
+		if strings.HasPrefix(name, "l3_device") || strings.HasPrefix(name, "l3_epc") || strings.HasPrefix(name, "tag_source") ||
+			strings.HasPrefix(name, "capture_network_type_id") || name == "host" || strings.HasPrefix(name, "host_") {
+			continue
+		}
+		// Skip role and is_internet — added as virtual tags with proper display names.
+		if name == "role" || name == "is_internet" {
 			continue
 		}
 
-		// For resource ID columns, only generate the tag variant (skip direct entry).
+		// Skip internal aggregation columns.
+		if strings.HasSuffix(name, "_sum") || strings.HasSuffix(name, "_count") || strings.HasSuffix(name, "_max") {
+			continue
+		}
+
+		// Skip IP raw columns (ip4_0, ip4_1, ip6_0, ip6_1 handled separately).
+		if strings.HasPrefix(name, "ip4_") || strings.HasPrefix(name, "ip6_") {
+			continue
+		}
+
+		// For naming convention: if column ends with _id_0 or _id_1, generate tag variant.
+		// E.g., auto_instance_id_0 → auto_instance_0 (客户端 实例).
 		if strings.HasSuffix(name, "_id_0") || strings.HasSuffix(name, "_id_1") {
 			tagName := strings.Replace(name, "_id_", "_", 1)
 			side := "客户端"
@@ -304,22 +376,41 @@ func queryShowMetricsCH(database, table string) []interface{} {
 		MetricType int
 		Desc       string
 	}{
-		{"request", "请求", "Throughput", 1, "请求数"},
-		{"response", "响应", "Throughput", 1, "响应数"},
-		{"log_count", "日志总量", "Throughput", 1, "日志总量"},
-		{"session_length", "会话长度", "Throughput", 1, "请求长度 + 响应长度"},
+		{"request", "请求", "Throughput", 1, "请求总数"},
+		{"response", "响应", "Throughput", 1, "响应总数"},
 		{"error", "异常", "Error", 1, "客户端异常 + 服务端异常"},
 		{"client_error", "客户端异常", "Error", 1, "客户端异常数"},
 		{"server_error", "服务端异常", "Error", 1, "服务端异常数"},
+		{"timeout", "超时", "Error", 1, "超时数"},
 		{"error_ratio", "异常比例", "Error", 4, "异常 / 响应"},
 		{"client_error_ratio", "客户端异常比例", "Error", 4, "客户端异常 / 响应"},
 		{"server_error_ratio", "服务端异常比例", "Error", 4, "服务端异常 / 响应"},
+		{"timeout_ratio", "超时比例", "Error", 4, "超时 / 请求"},
 		{"response_ratio", "响应比例", "Throughput", 4, "响应 / 请求"},
 		{"success_ratio", "正常比例", "Throughput", 4, "1 - 异常 / 响应"},
 		{"row", "行数", "Other", 8, "数据行数"},
+		{"direction_score", "方向得分", "Throughput", 9, ""},
+		{"log_count", "日志总量", "Throughput", 1, "日志总量"},
+		{"session_length", "会话长度", "Throughput", 1, "请求长度 + 响应长度"},
 	}
 	for _, m := range coreMetrics {
 		addMetric(m.Name, m.Display, "", true, m.MetricType, m.Category, m.Desc)
+	}
+
+	log.Printf("ShowMetrics: queryShowMetricsCH called for db=%s tbl=%s", database, table)
+	// Add virtual metrics (computed by ZT, not directly in CH).
+	virtualMetrics := []struct {
+		Name    string
+		Display string
+		Desc    string
+		MType   int
+	}{
+		{"rrt", "平均时延", "采集周期内所有应用时延的平均值", 3},
+		{"rrt_max", "最大时延", "采集周期内所有应用时延的最大值", 3},
+	}
+	for _, vm := range virtualMetrics {
+		log.Printf("ShowMetrics: adding virtual metric %s", vm.Name)
+		addMetric(vm.Name, vm.Display, "us", true, vm.MType, "Delay", vm.Desc)
 	}
 
 	// Add virtual/computed tags that aren't physical columns but are used by Topo/Top queries.
