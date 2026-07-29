@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"time"
 	"deeptrace-backend/engine"
@@ -1180,6 +1181,14 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 				uniqueClientEPs = append(uniqueClientEPs, ep)
 			}
 		}
+		// Limit endpoints to top 5 by total count (matching cloud behavior).
+		sort.Slice(uniqueServerEPs, func(i, j int) bool {
+			ti := float64(0); if s, ok := agg.epStats[uniqueServerEPs[i]]; ok { ti = s.total }
+			tj := float64(0); if s, ok := agg.epStats[uniqueServerEPs[j]]; ok { tj = s.total }
+			return ti > tj
+		})
+		if len(uniqueServerEPs) > 5 { uniqueServerEPs = uniqueServerEPs[:5] }
+
 		// Build endpoint_stats for server side (endpoints_1)
 		var serverEndpointStats []interface{}
 		for _, ep := range uniqueServerEPs {
@@ -1206,6 +1215,14 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 		if serverEndpointStats == nil {
 			serverEndpointStats = []interface{}{}
 		}
+		// Limit endpoints to top 5 by total count (matching cloud behavior).
+		sort.Slice(uniqueClientEPs, func(i, j int) bool {
+			ti := float64(0); if s, ok := agg.epStats[uniqueClientEPs[i]]; ok { ti = s.total }
+			tj := float64(0); if s, ok := agg.epStats[uniqueClientEPs[j]]; ok { tj = s.total }
+			return ti > tj
+		})
+		if len(uniqueClientEPs) > 5 { uniqueClientEPs = uniqueClientEPs[:5] }
+
 		// Build endpoint_stats for client side (endpoints_0)
 		var clientEndpointStats []interface{}
 		for _, ep := range uniqueClientEPs {
