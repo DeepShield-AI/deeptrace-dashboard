@@ -85,3 +85,54 @@ func IconIDDefault(fieldName string) float64 {
 	}
 	return -15 // auto_instance_0 (client-side instance)
 }
+// NodeTypeFor maps auto_service_type to node_type string (matches cloud ZT behavior).
+func NodeTypeFor(t int) string {
+	switch t {
+	case 0:
+		return "internet_ip"
+	case 1:
+		return "chost"
+	case 11:
+		return "pod_service"
+	case 15:
+		return "lb"
+	case 103:
+		return "pod_cluster"
+	case 104:
+		return "biz_service"
+	case 120:
+		return "gprocess"
+	case 130, 133:
+		return "pod_group"
+	case 255:
+		return "ip"
+	default:
+		return "other"
+	}
+}
+
+// IconFor maps auto_service_type to icon_id (matches cloud ZT behavior).
+func IconFor(t int) float64 {
+	switch t {
+	case 0:
+		return -1
+	case 1:
+		return -23
+	case 11:
+		return -16
+	case 15:
+		return -12
+	case 103:
+		return -13
+	case 104:
+		return -45
+	case 120:
+		return -43
+	case 130, 133:
+		return -18
+	case 255:
+		return -10
+	default:
+		return -42
+	}
+}

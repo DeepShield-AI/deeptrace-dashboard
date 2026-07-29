@@ -43,13 +43,14 @@ func main() {
 
 	// Create the query service (central business logic entry point).
 	enumSvc := enum.NewEnumService(cch)
+	enumSvc.Init()
+	chDS.SetEnumService(enumSvc)
 	querierSvc := &query.QuerierService{
 		Chain:     chain,
 		CH:        cch,
 		Zerotrace: ztSvc,
 		Enum:      enumSvc,
 	}
-	enumSvc.Init()
 
 	deps := &transport.Dependencies{
 		Cache:      cchCache,

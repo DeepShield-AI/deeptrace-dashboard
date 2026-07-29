@@ -19,6 +19,8 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	if zt == nil || !zt.Available() { return nil, nil }
 	var req query.QuerierListRequest
 	if err := json.Unmarshal([]byte(bodyStr), &req); err != nil { return nil, nil }
+	req.NormalizeQuery()
+	if len(req.Queries) == 0 { return nil, nil }
 	db := req.Database
 	tbl := req.Table
 	if db == "" { db = "flow_log" }
@@ -49,7 +51,7 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	qid := ""
 	if len(req.Queries) > 0 { qid = req.Queries[0].QueryID }
 	rows, err := zt.QueryRaw(db, sql)
-	if err != nil { log.Printf("⚠️  querier.List error: %v", err); return nil, nil }
+	if err != nil { log.Printf("🔍 querier.List: ZT unavailable (%v), falling back to CH", err); return nil, nil }
 	if len(rows.Values) == 0 {
 		return &query.Result{Data: []map[string]interface{}{}, Type: "Application_Detail_List"}, nil
 	}
@@ -69,6 +71,8 @@ func QueryTop(zt *client.ZerotraceService, bodyStr string) (*query.Result, error
 	if zt == nil || !zt.Available() { return nil, nil }
 	var req query.QuerierListRequest
 	if err := json.Unmarshal([]byte(bodyStr), &req); err != nil { return nil, nil }
+	req.NormalizeQuery()
+	if len(req.Queries) == 0 { return nil, nil }
 	db := req.Database
 	tbl := req.Table
 	if db == "" { db = "flow_log" }
@@ -100,7 +104,7 @@ func QueryTop(zt *client.ZerotraceService, bodyStr string) (*query.Result, error
 	if len(req.Queries) > 0 { qid = req.Queries[0].QueryID }
 	rows, err := zt.QueryRaw(db, sql)
 	if err != nil {
-		log.Printf("⚠️  querier.Top error: %v", err)
+		log.Printf("🔍 querier.Top: ZT unavailable (%v), falling back to CH", err)
 		return &query.Result{Data: []map[string]interface{}{}}, nil
 	}
 	if len(rows.Values) == 0 {

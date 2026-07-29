@@ -27,6 +27,7 @@ type QuerierListQuery struct {
 	Roles   []string `json:"ROLES"`
 	Select  string   `json:"SELECT"`
 	Where   string   `json:"WHERE"`
+	Having  string   `json:"HAVING"`
 	Tags    []string `json:"TAGS"`
 	CTags   []string `json:"CTAGS"`
 	STags   []string `json:"STAGS"`
@@ -57,7 +58,35 @@ type QuerierListRequest struct {
 	Interval   int                `json:"interval"`
 	WindowSize int                `json:"window_size"`
 	Fill       string             `json:"fill"`
-	RawBody    json.RawMessage    `json:"-"`
+
+	// Flat Top format fields (not wrapped in QUERIES array).
+	SelectField string `json:"SELECT,omitempty"`
+	WhereField  string `json:"WHERE,omitempty"`
+	GroupByField string `json:"GROUP_BY,omitempty"`
+	OrderByField string `json:"ORDER_BY,omitempty"`
+	OrderDir    string `json:"ORDER,omitempty"`
+	Limit       int    `json:"LIMIT,omitempty"`
+
+	RawBody json.RawMessage `json:"-"`
+}
+
+// NormalizeQuery populates Queries[0] from flat SELECT/WHERE/GROUP_BY if QUERIES is empty.
+func (r *QuerierListRequest) NormalizeQuery() {
+	if len(r.Queries) == 0 && r.SelectField != "" {
+		r.Queries = []QuerierListQuery{{
+			Select:  r.SelectField,
+			Where:   r.WhereField,
+			GroupBy: r.GroupByField,
+		}}
+		// Map flat LIMIT → TOP.
+		if r.Limit > 0 && r.Top == 0 {
+			r.Top = FlexInt(r.Limit)
+		}
+		// Propagate flat ORDER_BY to Sort field.
+		if r.OrderByField != "" && r.Sort == nil {
+			r.Sort = &ListSort{OrderBy: r.OrderByField, SortedBy: r.OrderDir}
+		}
+	}
 }
 
 func (r *QuerierListRequest) UnmarshalJSON(b []byte) error {
