@@ -42,7 +42,7 @@ func init() {
 // Existing OS environment variables always take precedence.
 func loadEnvFile() {
 	files := []string{".env", ".env.local"}
-	for _, name := range files {
+	for i, name := range files {
 		if _, err := os.Stat(name); os.IsNotExist(err) {
 			continue
 		}
@@ -50,7 +50,6 @@ func loadEnvFile() {
 		if err != nil {
 			continue
 		}
-		defer f.Close()
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -66,8 +65,11 @@ func loadEnvFile() {
 			if key == "" {
 				continue
 			}
-			// Only set if not already set by environment (so real env vars win).
-			if os.Getenv(key) == "" {
+			// .env sets defaults (only if not already in OS env).
+			// .env.local always overrides (local developer overrides).
+			// Real OS env vars set before process start take precedence over both.
+			isLocal := i == 1 // .env.local is the second file
+			if isLocal || os.Getenv(key) == "" {
 				os.Setenv(key, val)
 			}
 		}
