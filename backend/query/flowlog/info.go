@@ -64,14 +64,39 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 			lower := strings.ToLower(expr)
 
 			switch {
+			case strings.HasPrefix(lower, "enum("):
+				inner := strings.Trim(expr[5:len(expr)-1], "`")
+				if isEnumUnsupported(strings.ToLower(inner)) {
+					cols = append(cols, fmt.Sprintf("'' AS `%s`", key))
+				} else {
+					cols = append(cols, fmt.Sprintf("%s AS `%s`", expr, key))
+				}
 			case strings.HasPrefix(lower, "newtag("),
-				strings.HasPrefix(lower, "enum("),
 				strings.HasPrefix(lower, "icon_id("),
 				strings.HasPrefix(lower, "node_type("):
 				cols = append(cols, fmt.Sprintf("%s AS `%s`", expr, key))
 
 			default:
 				col := strings.Trim(expr, "`")
+
+				// Columns not in local CH: replace with empty.
+				lowCol := strings.ToLower(col)
+				if lowCol == "is_async" || lowCol == "is_tls" || lowCol == "role" ||
+					strings.HasPrefix(lowCol, "gprocess.biz_type") ||
+					strings.HasPrefix(lowCol, "k8s.label_") || strings.HasPrefix(lowCol, "k8s.annotation_") ||
+					strings.HasPrefix(lowCol, "k8s.env_") || strings.HasPrefix(lowCol, "cloud.tag_") ||
+					strings.HasPrefix(lowCol, "os.app_") || lowCol == "attribute" ||
+					strings.HasPrefix(lowCol, "process_") || strings.HasPrefix(lowCol, "x_request_") ||
+					strings.HasPrefix(lowCol, "epc_") {
+					cleanKey := strings.Trim(key, "`")
+					cols = append(cols, fmt.Sprintf("'' AS `%s`", cleanKey))
+					continue
+				}
+
+				// application_log and other non-flow tables lack the 'role' column.
+				if (col == "role" || col == "Role") && db == "application_log" {
+					continue
+				}
 
 				if isFlowLog && tbl == "l7_flow_log" {
 					switch col {

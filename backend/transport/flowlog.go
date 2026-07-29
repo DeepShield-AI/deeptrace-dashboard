@@ -38,7 +38,7 @@ func handleFlowLogDetail(srv *query.QuerierService) http.HandlerFunc {
 			writeError(w, "cannot read body", 400)
 			return
 		}
-		result, err := flowlog.QueryList(srv.Zerotrace, string(body))
+		result, err := flowlog.QueryList(srv.Zerotrace, srv.Enum, string(body))
 		if err != nil {
 			log.Printf("⚠️  FlowLogDetail error: %v", err)
 			writeResult(w, &query.Result{Data: []map[string]interface{}{}})

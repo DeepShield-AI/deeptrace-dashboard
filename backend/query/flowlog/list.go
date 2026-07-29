@@ -10,6 +10,7 @@ import (
 
 	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/enum"
 	"deeptrace-backend/query"
 )
 
@@ -39,7 +40,7 @@ type sort struct {
 
 // QueryList executes a FlowLogDetailList query via deepflow-server.
 // Returns TYPE: "Flow_Log_Detail_List".
-func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, error) {
+func QueryList(zt *client.ZerotraceService, enumSvc *enum.EnumService, bodyStr string) (*query.Result, error) {
 	if zt == nil {
 		return &query.Result{
 			Data:  []map[string]interface{}{},
@@ -83,14 +84,35 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 			lower := strings.ToLower(expr)
 
 			switch {
+			case strings.HasPrefix(lower, "enum("):
+				inner := strings.Trim(expr[5:len(expr)-1], "`")
+				// is_async/is_tls may not exist in local CH; use empty fallback.
+				if isEnumUnsupported(strings.ToLower(inner)) {
+					cols = append(cols, fmt.Sprintf("'' AS `%s`", key))
+				} else {
+					cols = append(cols, fmt.Sprintf("%s AS `%s`", expr, key))
+				}
 			case strings.HasPrefix(lower, "newtag("),
-				strings.HasPrefix(lower, "enum("),
 				strings.HasPrefix(lower, "icon_id("),
 				strings.HasPrefix(lower, "node_type("):
 				cols = append(cols, fmt.Sprintf("%s AS `%s`", expr, key))
 
 			default:
 				col := strings.Trim(expr, "`")
+
+				// Columns not in local CH: replace with empty to avoid ZT failures.
+				lowCol := strings.ToLower(col)
+				if lowCol == "is_async" || lowCol == "is_tls" || lowCol == "role" ||
+					strings.HasPrefix(lowCol, "gprocess.biz_type") ||
+					strings.HasPrefix(lowCol, "k8s.label_") || strings.HasPrefix(lowCol, "k8s.annotation_") ||
+					strings.HasPrefix(lowCol, "k8s.env_") || strings.HasPrefix(lowCol, "cloud.tag_") ||
+					strings.HasPrefix(lowCol, "os.app_") || lowCol == "attribute" ||
+					strings.HasPrefix(lowCol, "process_") || strings.HasPrefix(lowCol, "x_request_") ||
+					strings.HasPrefix(lowCol, "epc_") {
+					cleanKey := strings.Trim(key, "`")
+					cols = append(cols, fmt.Sprintf("'' AS `%s`", cleanKey))
+					continue
+				}
 
 				if isFlowLog && tbl == "l7_flow_log" {
 					switch col {
@@ -135,6 +157,7 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 
 	rows, err := zt.QueryRaw(db, sql)
 	if err != nil {
+		log.Printf("⚠️  FlowLogDetail ZT failed: %v", err)
 		return nil, err
 	}
 	if len(rows.Values) == 0 {
@@ -183,7 +206,16 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 			if !ok || val == "" {
 				continue
 			}
-			if zh := EnumZHCN(val); zh != "" {
+			// Use EnumService for Chinese display names (loaded from CH dictionaries).
+			// The lookup key is the raw value (e.g., "modify"), not the English display name.
+			// The raw column has the same name as the enum argument.
+			enumName := strings.TrimPrefix(preAs, "enum(")
+			enumName = strings.TrimSuffix(enumName, ")")
+			if enumSvc != nil {
+				if rawVal, ok2 := row[enumName]; ok2 && rawVal != nil {
+					data[ir][col] = enumSvc.GetDisplay(enumName, rawVal)
+				}
+			} else if zh := EnumZHCN(val); zh != "" {
 				data[ir][col] = zh
 			}
 		}
@@ -200,4 +232,20 @@ func QueryList(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 		Type:   "Flow_Log_Detail_List",
 		Fields: schemas,
 	}, nil
+}
+
+
+
+// isEnumUnsupported reports whether the local ZT/deepflow-server doesn't support Enum() for this column.
+func isEnumUnsupported(col string) bool {
+	switch col {
+	case "is_async", "is_tls", "is_reversed", "is_ipv4", "is_internet_0", "is_internet_1",
+		"tunnel_type", "span_kind", "nat_source", 
+		"tap_side":
+		return true
+	}
+	if strings.HasPrefix(col, "gprocess.biz_type") {
+		return true
+	}
+	return false
 }
