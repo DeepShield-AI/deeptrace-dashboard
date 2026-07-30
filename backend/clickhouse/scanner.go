@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"time"
 
@@ -124,6 +125,13 @@ func ScanRows(rows driver.Rows) ([]map[string]interface{}, error) {
 			row[name] = valueFromTarget(targets[i])
 		}
 		data = append(data, row)
+	}
+	for _, row := range data {
+		for k, v := range row {
+			if f, ok := v.(float64); ok && math.IsNaN(f) {
+				row[k] = nil
+			}
+		}
 	}
 	return data, rows.Err()
 }

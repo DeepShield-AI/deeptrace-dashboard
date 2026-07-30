@@ -117,6 +117,8 @@ func handleTop(srv *query.QuerierService) http.HandlerFunc {
 		}
 		var req query.QuerierListRequest
 		if err := json.Unmarshal(body, &req); err != nil {
+			log.Printf("⚠️  Top unmarshal error: %v", err)
+			writeResult(w, &query.Result{Data: []map[string]interface{}{}})
 			return
 		}
 		req.NormalizeQuery()
