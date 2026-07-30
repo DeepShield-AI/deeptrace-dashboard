@@ -44,6 +44,11 @@ type ListSort struct {
 // QuerierListRequest is the full body of a querier List/Top/FlowLog request.
 
 // QueryListResult holds the result of a List query.
+// QueryFlowLogResult holds the result of a FlowLogDetail query.
+type QueryFlowLogResult struct {
+	Data []map[string]interface{}
+}
+
 type QueryListResult struct {
 	Data   []map[string]interface{}
 	Fields map[string]interface{}
@@ -54,11 +59,6 @@ type QueryListResult struct {
 type QueryTopResult struct {
 	Data   []map[string]interface{}
 	Fields map[string]interface{}
-}
-
-// QueryFlowLogResult holds the result of a FlowLogDetail query.
-type QueryFlowLogResult struct {
-	Data []map[string]interface{}
 }
 
 // QueryTraceMapResult holds the result of a TraceMap query.
