@@ -1,6 +1,7 @@
 package list
 
 import (
+	"deeptrace-backend/query"
 	"context"
 	"fmt"
 	"log"
@@ -11,7 +12,7 @@ import (
 )
 
 // QueryList builds and executes a List query against ClickHouse.
-func QueryList(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.QuerierRequest) (*clickhouse.QueryListResult, error) {
+func QueryList(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.QuerierRequest) (*query.QueryListResult, error) {
 	sql, err := clickhouse.BuildSelectSQL(*req)
 	if err != nil {
 		return nil, fmt.Errorf("build sql: %w", err)
@@ -93,7 +94,7 @@ func QueryList(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Qu
 			}
 		}
 	}
-	return &clickhouse.QueryListResult{
+	return &query.QueryListResult{
 		Data:   data,
 		Fields: schemas,
 		Count:  count,

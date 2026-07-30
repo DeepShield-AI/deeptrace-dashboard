@@ -1,6 +1,7 @@
 package flowlog
 
 import (
+	"deeptrace-backend/query"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 )
 
 // QueryFlowLogDetailCH queries ClickHouse directly for FlowLog detail data.
-func QueryFlowLogDetailCH(ch *clickhouse.CHService, ctx context.Context, bodyStr string) (*clickhouse.QueryFlowLogResult, error) {
+func QueryFlowLogDetailCH(ch *clickhouse.CHService, ctx context.Context, bodyStr string) (*query.QueryFlowLogResult, error) {
 	var req struct {
 		Database string `json:"DATABASE"`
 		Table    string `json:"TABLE"`
@@ -161,5 +162,5 @@ func QueryFlowLogDetailCH(ch *clickhouse.CHService, ctx context.Context, bodyStr
 		}
 		processed = append(processed, row)
 	}
-	return &clickhouse.QueryFlowLogResult{Data: processed}, nil
+	return &query.QueryFlowLogResult{Data: processed}, nil
 }

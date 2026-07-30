@@ -1,6 +1,7 @@
 package top
 
 import (
+	"deeptrace-backend/query"
 	"context"
 
 	"deeptrace-backend/query/tracemap"
@@ -13,7 +14,7 @@ import (
 )
 
 
-func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.QuerierRequest) (*clickhouse.QueryTopResult, error) {
+func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.QuerierRequest) (*query.QueryTopResult, error) {
 	db := req.Database
 	table := req.Table
 	if db == "" {
@@ -416,7 +417,7 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 	}
 
 	if len(data) == 0 {
-		return &clickhouse.QueryTopResult{Data: []map[string]interface{}{}}, nil
+		return &query.QueryTopResult{Data: []map[string]interface{}{}}, nil
 	}
 
 	var resultRows []map[string]interface{}
@@ -569,7 +570,7 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 			}
 		}
 	}
-	return &clickhouse.QueryTopResult{
+	return &query.QueryTopResult{
 		Data:   resultRows,
 		Fields: schemas,
 	}, nil

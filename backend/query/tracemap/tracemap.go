@@ -1,6 +1,7 @@
 package tracemap
 
 import (
+	"deeptrace-backend/query"
 	"context"
 	"fmt"
 	"log"
@@ -43,7 +44,7 @@ type tmAgg struct {
 // QueryTraceMap — returns TraceMap node data from ClickHouse
 // ---------------------------------------------------------------------------
 
-func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, timeEnd int64, queryCondition string) (*clickhouse.QueryTraceMapResult, error) {
+func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, timeEnd int64, queryCondition string) (*query.QueryTraceMapResult, error) {
 	qCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
@@ -114,7 +115,7 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		return nil, fmt.Errorf("scan: %w", err)
 	}
 	if len(allData) == 0 {
-		return &clickhouse.QueryTraceMapResult{}, nil
+		return &query.QueryTraceMapResult{}, nil
 	}
 
 	// -----------------------------------------------------------------------
@@ -686,7 +687,7 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		nodes[idx1]["parent_node_infos"] = append(par, parentInfo)
 	}
 
-	return &clickhouse.QueryTraceMapResult{
+	return &query.QueryTraceMapResult{
 		Data:             nodes,
 		TotalTraces:      int(totalTraceCount),
 		CalculatedTraces: int(calcTraceCount),
