@@ -12,6 +12,7 @@ import (
 
 	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/query"
+	"deeptrace-backend/query/topo"
 )
 
 
@@ -72,17 +73,17 @@ func handleTopo(srv *query.QuerierService) http.HandlerFunc {
 			// Add uid_0/uid_1 to peers matching cloud format.
 			// Override ZT placeholder node_type/icon_id with our mapping so uid_0/uid_1 match instances.
 			for _, suf := range []string{"_0", "_1"} {
-				ast := int(getIntVal(row, "auto_service_type"+suf))
+				ast := int(topo.GetIntVal(row, "auto_service_type"+suf))
 				if suf == "_0" {
-					row["client_node_type"] = topoNodeTypeFor(ast)
-					row["client_icon_id"] = topoIconFor(ast)
+					row["client_node_type"] = topo.TopoNodeTypeFor(ast)
+					row["client_icon_id"] = topo.TopoIconFor(ast)
 				} else {
-					row["server_node_type"] = topoNodeTypeFor(ast)
-					row["server_icon_id"] = topoIconFor(ast)
+					row["server_node_type"] = topo.TopoNodeTypeFor(ast)
+					row["server_icon_id"] = topo.TopoIconFor(ast)
 				}
 			}
-			uid0 := buildTopoUID(row, "_0", "client_icon_id", "client_node_type")
-			uid1 := buildTopoUID(row, "_1", "server_icon_id", "server_node_type")
+			uid0 := topo.BuildTopoUID(row, "_0", "client_icon_id", "client_node_type")
+			uid1 := topo.BuildTopoUID(row, "_1", "server_icon_id", "server_node_type")
 			row["uid_0"] = uid0
 			row["uid_1"] = uid1
 			instances = appendTopoInstance(instances, seen, row, "_0", "c", uid0)
@@ -211,17 +212,17 @@ func queryTopoFlowMetrics(ch *clickhouse.CHService, req query.QuerierListRequest
 	var instances []map[string]interface{}
 	var rateKey, errKey, latencyKey string
 	for _, row := range data {
-		uid0 := buildTopoUID(row, "_0", "client_icon_id", "client_node_type")
-		uid1 := buildTopoUID(row, "_1", "server_icon_id", "server_node_type")
+		uid0 := topo.BuildTopoUID(row, "_0", "client_icon_id", "client_node_type")
+		uid1 := topo.BuildTopoUID(row, "_1", "server_icon_id", "server_node_type")
 
 		// Fallback: if auto_service is empty and id is 0, use IP4 as name (orphan case P2)
-		svc0 := getStrVal(row, "auto_service_0")
+		svc0 := topo.GetStrVal(row, "auto_service_0")
 		if svc0 == "" {
 			if v, ok := row["ip4_0"]; ok && v != nil {
 				svc0 = fmt.Sprintf("%v", v)
 			}
 		}
-		svc1 := getStrVal(row, "auto_service_1")
+		svc1 := topo.GetStrVal(row, "auto_service_1")
 		if svc1 == "" {
 			if v, ok := row["ip4_1"]; ok && v != nil {
 				svc1 = fmt.Sprintf("%v", v)
@@ -374,10 +375,10 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 	row map[string]interface{}, suffix, role string, uid string) []map[string]interface{} {
 
 	// Build a unique key from (auto_service_id_suffix, observation_point, is_internet_suffix)
-	svcID := getStrVal(row, "auto_service_id"+suffix)
-	svcName := getStrVal(row, "auto_service"+suffix)
-	obs := getStrVal(row, "observation_point")
-	isNet := getStrVal(row, "is_internet"+suffix)
+	svcID := topo.GetStrVal(row, "auto_service_id"+suffix)
+	svcName := topo.GetStrVal(row, "auto_service"+suffix)
+	obs := topo.GetStrVal(row, "observation_point")
+	isNet := topo.GetStrVal(row, "is_internet"+suffix)
 	key := svcID + "|" + obs + "|" + isNet + "|" + svcName
 	if seen[key] {
 		return instances
@@ -396,8 +397,8 @@ func appendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 		"auto_service":      row["auto_service"+suffix],
 		"auto_service_type": row["auto_service_type"+suffix],
 		"is_internet":       row["is_internet"+suffix],
-		"node_type":         topoNodeTypeFor(int(getIntVal(row, "auto_service_type"+suffix))),
-		"icon_id":           topoIconFor(int(getIntVal(row, "auto_service_type"+suffix))),
+		"node_type":         topo.TopoNodeTypeFor(int(topo.GetIntVal(row, "auto_service_type"+suffix))),
+		"icon_id":           topo.TopoIconFor(int(topo.GetIntVal(row, "auto_service_type"+suffix))),
 		"resource_l7_protocol": row["resource_l7_protocol" + suffix],
 	}
 
@@ -438,7 +439,7 @@ func appendOrphanInstances(instances []map[string]interface{}, peers []map[strin
 			if svcIDStr != "0" {
 				continue
 			}
-			svcName := getStrVal(p, "auto_service"+suffix)
+			svcName := topo.GetStrVal(p, "auto_service"+suffix)
 			if svcName == "" {
 				continue
 			}
@@ -450,7 +451,7 @@ func appendOrphanInstances(instances []map[string]interface{}, peers []map[strin
 				iconKey = "server_icon_id"
 				nodeKey = "server_node_type"
 			}
-			uid := buildTopoUIDFromMap(p, suffix, iconKey, nodeKey, svcName)
+			uid := topo.BuildTopoUIDFromMap(p, suffix, iconKey, nodeKey, svcName)
 			if seenUIDs[uid] {
 				continue
 			}
@@ -485,121 +486,3 @@ func appendOrphanInstances(instances []map[string]interface{}, peers []map[strin
 	return instances
 }
 
-func buildTopoUIDFromMap(m map[string]interface{}, suffix, iconKey, nodeKey, svcName string) string {
-	svcID := fmt.Sprintf("%v", m["auto_service_id"+suffix])
-	svcType := fmt.Sprintf("%v", m["auto_service_type"+suffix])
-	iconID := fmt.Sprintf("%v", m[iconKey])
-	nodeType := fmt.Sprintf("%v", m[nodeKey])
-	return fmt.Sprintf("auto_service=%s,auto_service_id=%s,auto_service_type=%s,icon_id=%s,is_internet=0,node_type=%s,rs_set_id=R1",
-		svcName, svcID, svcType, iconID, nodeType)
-}
-
-// buildTopoUID builds a UID string matching cloud format:
-// auto_service=<name>,auto_service_id=<id>,auto_service_type=<type>,icon_id=<icon>,is_internet=<n>,node_type=<nt>,rs_set_id=R1
-func buildTopoUID(row map[string]interface{}, suffix, iconKey, nodeKey string) string {
-	svcName := ""
-	if v, ok := row["auto_service"+suffix]; ok && v != nil {
-		svcName = fmt.Sprintf("%v", v)
-	}
-	svcID := ""
-	if v, ok := row["auto_service_id"+suffix]; ok && v != nil {
-		svcID = fmt.Sprintf("%v", v)
-	}
-	svcType := ""
-	if v, ok := row["auto_service_type"+suffix]; ok && v != nil {
-		svcType = fmt.Sprintf("%v", v)
-	}
-	iconID := ""
-	if v, ok := row[iconKey]; ok && v != nil {
-		iconID = fmt.Sprintf("%v", v)
-	}
-	nodeType := ""
-	if v, ok := row[nodeKey]; ok && v != nil {
-		nodeType = fmt.Sprintf("%v", v)
-	}
-	return fmt.Sprintf("auto_service=%s,auto_service_id=%s,auto_service_type=%s,icon_id=%s,is_internet=0,node_type=%s,rs_set_id=R1",
-		svcName, svcID, svcType, iconID, nodeType)
-}
-
-// getStrVal safely extracts a string value from a map.
-// topoNodeTypeFor maps auto_service_type to node_type string (matches cloud behavior).
-func topoNodeTypeFor(t int) string {
-	switch t {
-	case 0:
-		return "internet_ip"
-	case 1:
-		return "chost"
-	case 11:
-		return "pod_service"
-	case 15:
-		return "lb"
-	case 103:
-		return "pod_cluster"
-	case 104:
-		return "biz_service"
-	case 120:
-		return "gprocess"
-	case 130, 133:
-		return "pod_group"
-	case 255:
-		return "ip"
-	default:
-		return "other"
-	}
-}
-
-// topoIconFor maps auto_service_type to icon_id (matches cloud behavior).
-func topoIconFor(t int) int {
-	switch t {
-	case 0:
-		return -1
-	case 1:
-		return -23
-	case 11:
-		return -16
-	case 15:
-		return -12
-	case 103:
-		return -13
-	case 104:
-		return -45
-	case 120:
-		return -43
-	case 130, 133:
-		return -18
-	case 255:
-		return -10
-	default:
-		return -42
-	}
-}
-
-// getIntVal safely extracts an int value from a map (returns 0 if missing/nil).
-func getIntVal(m map[string]interface{}, key string) int {
-	if v, ok := m[key]; ok && v != nil {
-		switch n := v.(type) {
-		case float64:
-			return int(n)
-		case int64:
-			return int(n)
-		case uint8:
-			return int(n)
-		case uint64:
-			return int(n)
-		case int:
-			return n
-		}
-	}
-	return 0
-}
-
-// getStrVal safely extracts a string value from a map.
-func getStrVal(m map[string]interface{}, key string) string {
-	if v, ok := m[key]; ok && v != nil {
-		if s, ok2 := v.(string); ok2 {
-			return s
-		}
-		return fmt.Sprintf("%v", v)
-	}
-	return ""
-}
