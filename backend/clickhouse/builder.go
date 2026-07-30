@@ -310,6 +310,9 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 	if resolvedDB == "flow_log" && !strings.Contains(resolvedTable, "_local") {
 		resolvedTable += "_local"
 	}
+	if resolvedDB == "flow_log" && !strings.Contains(resolvedTable, "_local") {
+		resolvedTable += "_local"
+	}
 	fullTable := ""
 	if resolvedDB != "" {
 		fullTable = "`" + resolvedDB + "`.`" + resolvedTable + "`"
@@ -394,6 +397,26 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 		colMap["tap_port"] = "tap_port"; colMap["vtap"] = "vtap_id"; colMap["agent"] = "agent_id"
 		colMap["service_0"] = "service_id_0"; colMap["service_1"] = "service_id_1"
 		colMap["gprocess_0"] = "gprocess_id_0"; colMap["gprocess_1"] = "gprocess_id_1"
+		colMap["service_1"] = "dictGetOrDefault('biz_service_map', 'name', toUInt64(biz_service_id_1), '')"
+		colMap["service_0"] = "dictGetOrDefault('biz_service_map', 'name', toUInt64(biz_service_id_0), '')"
+		colMap["pod_node_1"] = "dictGetOrDefault('pod_node_map', 'name', toUInt64(pod_node_id_1), '')"
+		colMap["pod_node_0"] = "dictGetOrDefault('pod_node_map', 'name', toUInt64(pod_node_id_0), '')"
+		colMap["pod_group_1"] = "dictGetOrDefault('pod_group_map', 'name', toUInt64(pod_group_id_1), '')"
+		colMap["pod_group_0"] = "dictGetOrDefault('pod_group_map', 'name', toUInt64(pod_group_id_0), '')"
+		colMap["pod_service_1"] = "dictGetOrDefault('pod_service_map', 'name', toUInt64(pod_service_id_1), '')"
+		colMap["pod_service_0"] = "dictGetOrDefault('pod_service_map', 'name', toUInt64(pod_service_id_0), '')"
+		colMap["pod_cluster_1"] = "dictGetOrDefault('pod_cluster_map', 'name', toUInt64(pod_cluster_id_1), '')"
+		colMap["pod_cluster_0"] = "dictGetOrDefault('pod_cluster_map', 'name', toUInt64(pod_cluster_id_0), '')"
+		colMap["pod_ns_1"] = "dictGetOrDefault('pod_ns_map', 'name', toUInt64(pod_ns_id_1), '')"
+		colMap["pod_ns_0"] = "dictGetOrDefault('pod_ns_map', 'name', toUInt64(pod_ns_id_0), '')"
+		colMap["vpc_1"] = "dictGetOrDefault('l3_epc_map', 'name', toUInt64(epc_id_1), '')"
+		colMap["vpc_0"] = "dictGetOrDefault('l3_epc_map', 'name', toUInt64(epc_id_0), '')"
+		colMap["chost_1"] = "dictGetOrDefault('chost_map', 'name', toUInt64(l3_device_id_1), '')"
+		colMap["chost_0"] = "dictGetOrDefault('chost_map', 'name', toUInt64(l3_device_id_0), '')"
+		colMap["az_1"] = "dictGetOrDefault('az_map', 'name', toUInt64(az_id_1), '')"
+		colMap["az_0"] = "dictGetOrDefault('az_map', 'name', toUInt64(az_id_0), '')"
+		colMap["region_1"] = "dictGetOrDefault('region_map', 'name', toUInt64(region_id_1), '')"
+		colMap["region_0"] = "dictGetOrDefault('region_map', 'name', toUInt64(region_id_0), '')"
 	}
 	if isFlowMetrics {
 		colMap["auto_service_0"] = "app_service"
