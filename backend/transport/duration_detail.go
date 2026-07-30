@@ -2,6 +2,7 @@ package transport
 
 import (
 	"deeptrace-backend/query/showmetrics"
+	"deeptrace-backend/query/showtagvalues"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -158,7 +159,7 @@ func handleDurationDetail(deps *Dependencies) http.HandlerFunc {
 			r["_querier_region"] = "本地"
 			if _, exists := r["Enum(observation_point)"]; !exists {
 				if op, ok := r["observation_point"]; ok {
-					if fb, found := builtinEnumFallback["observation_point"]; found {
+					if fb, found := showtagvalues.BuiltinEnumFallback["observation_point"]; found {
 						if display, ok2 := fb[fmt.Sprintf("%v", op)]; ok2 {
 							r["Enum(observation_point)"] = display
 						} else { r["Enum(observation_point)"] = op }

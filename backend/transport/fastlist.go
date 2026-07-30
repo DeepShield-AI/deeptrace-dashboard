@@ -2,6 +2,7 @@ package transport
 
 import (
 	"deeptrace-backend/query/showmetrics"
+	"deeptrace-backend/query/showtagvalues"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -455,12 +456,12 @@ func chQueryFastList(deps *Dependencies, db, tbl, selStr string, extras []string
 		if eErr == nil {
 			for _, er := range eRes {
 				k := fmt.Sprintf("%v", er["toString(value)"])
-				v := getSVStr(er, "name_zh")
+				v := showtagvalues.GetSVStr(er, "name_zh")
 				m[k] = v
 			}
 		}
 		if len(m) == 0 {
-			if fb, ok := builtinEnumFallback[col]; ok {
+			if fb, ok := showtagvalues.BuiltinEnumFallback[col]; ok {
 				m = fb
 			}
 		}
