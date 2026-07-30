@@ -1,21 +1,19 @@
-package clickhouse
+package top
 
 import (
 	"context"
+
+	"deeptrace-backend/query/tracemap"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
+	"deeptrace-backend/clickhouse"
 )
 
-type MetricExpr struct {
-	Key string
-	SQL string
-}
 
-
-func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTopResult, error) {
+func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.QuerierRequest) (*clickhouse.QueryTopResult, error) {
 	db := req.Database
 	table := req.Table
 	if db == "" {
@@ -42,10 +40,10 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		return nil, fmt.Errorf("no queries")
 	}
 	q := req.Queries[0]
-	items := ParseSelectList(q.Select)
+	items := clickhouse.ParseSelectList(q.Select)
 
 	constKeys := map[string]bool{}
-	var MetricExprs []MetricExpr
+	var metricExprs []clickhouse.MetricExpr
 	isFlowLog := db == "flow_log"
 	isFlowMetrics := db == "flow_metrics"
 
@@ -58,7 +56,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			if commaIdx > 0 {
 				field := strings.TrimSpace(inner[:commaIdx])
 				pct := strings.TrimSpace(inner[commaIdx+1:])
-				MetricExprs = append(MetricExprs, MetricExpr{
+				metricExprs = append(metricExprs, clickhouse.MetricExpr{
 					item.Key, fmt.Sprintf("quantile(%s)(`%s`)", pct, strings.ReplaceAll(field, "`", "")),
 				})
 			}
@@ -78,8 +76,8 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			continue
 		}
 
-		if IsAggExpr(item.Expr) {
-			sqlExpr := NormalizeExpr(item.Expr)
+		if clickhouse.IsAggExpr(item.Expr) {
+			sqlExpr := clickhouse.NormalizeExpr(item.Expr)
 
 			if isFlowLog {
 				// flow_log table: override metricMaps designed for flow_metrics.
@@ -118,11 +116,11 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 					sqlExpr = strings.ReplaceAll(sqlExpr, "rtt", "rtt_sum / greatest(rtt_count, 1)")
 				}
 			}
-			MetricExprs = append(MetricExprs, MetricExpr{item.Key, sqlExpr})
+			metricExprs = append(metricExprs, clickhouse.MetricExpr{item.Key, sqlExpr})
 		}
 	}
 
-	if len(MetricExprs) == 0 {
+	if len(metricExprs) == 0 {
 		return nil, fmt.Errorf("no metric expressions found")
 	}
 
@@ -134,7 +132,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		wheres = append(wheres, fmt.Sprintf("time <= %d", req.TimeEnd))
 	}
 	if q.Where != "" {
-		cleanWhere := CleanWhereClause(q.Where)
+		cleanWhere := clickhouse.CleanWhereClause(q.Where)
 		if cleanWhere != "" {
 			wheres = append(wheres, cleanWhere)
 		}
@@ -145,7 +143,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	}
 
 	var metricSelects []string
-	for _, m := range MetricExprs {
+	for _, m := range metricExprs {
 		metricSelects = append(metricSelects, fmt.Sprintf("%s AS `%s`", m.SQL, m.Key))
 	}
 
@@ -166,14 +164,14 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	querySQL := fmt.Sprintf("SELECT %s FROM %s%s%s%s", strings.Join(selectCols, ", "), fullTable, whereClause, groupPart, limitPart)
 	log.Printf("CH Top SQL: %s", querySQL)
 
-	rows, err := s.Query(qCtx, querySQL)
+	rows, err := ch.Query(qCtx, querySQL)
 	if err != nil {
 		log.Printf("CH query error: %v", err)
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
 
-	data, err := ScanRows(rows)
+	data, err := clickhouse.ScanRows(rows)
 	if err != nil {
 		log.Printf("CH scan error: %v", err)
 		return nil, fmt.Errorf("scan: %w", err)
@@ -403,10 +401,10 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		log.Printf("CH Top grouped SQL: %s", groupSQL)
 
 		rows.Close()
-		gRows, gErr := s.Query(qCtx, groupSQL)
+		gRows, gErr := ch.Query(qCtx, groupSQL)
 		if gErr == nil {
 			defer gRows.Close()
-			if gData, gErr2 := ScanRows(gRows); gErr2 == nil {
+			if gData, gErr2 := clickhouse.ScanRows(gRows); gErr2 == nil {
 				data = gData
 				log.Printf("CH Top grouped: %d rows", len(data))
 			} else {
@@ -418,7 +416,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	}
 
 	if len(data) == 0 {
-		return &QueryTopResult{Data: []map[string]interface{}{}}, nil
+		return &clickhouse.QueryTopResult{Data: []map[string]interface{}{}}, nil
 	}
 
 	var resultRows []map[string]interface{}
@@ -474,7 +472,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 				}
 			}
 		}
-		for _, m := range MetricExprs {
+		for _, m := range metricExprs {
 			if v, ok := row[m.Key]; ok {
 				resultRow[m.Key] = v
 			}
@@ -519,10 +517,10 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		}
 		hSQL := fmt.Sprintf("SELECT toUnixTimestamp(toStartOfInterval(time, INTERVAL %d SECOND)) AS toi, %s FROM %s%s GROUP BY toi ORDER BY toi LIMIT 500",
 			intervalSec, strings.Join(metricSelects, ", "), fullTable, histWhere)
-		histRows, hErr := s.Query(qCtx, hSQL)
+		histRows, hErr := ch.Query(qCtx, hSQL)
 		if hErr == nil {
-			if histData, hErr2 := ScanRows(histRows); hErr2 == nil {
-				resultRow["HISTORY"] = fillNullHistory(convertHistory(histData, MetricExprs), int64(req.Interval), req.TimeStart, req.TimeEnd, req.Fill, MetricExprs)
+			if histData, hErr2 := clickhouse.ScanRows(histRows); hErr2 == nil {
+				resultRow["HISTORY"] = tracemap.FillNullHistory(tracemap.ConvertHistory(histData, metricExprs), int64(req.Interval), req.TimeStart, req.TimeEnd, req.Fill, metricExprs)
 			}
 			histRows.Close()
 		}
@@ -536,7 +534,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	// Build pre_as map from SELECT expressions (same as List handler).
 	preAsMap := map[string]string{}
 	if len(req.Queries) > 0 && req.Queries[0].Select != "" {
-		for _, item := range ParseSelectList(req.Queries[0].Select) {
+		for _, item := range clickhouse.ParseSelectList(req.Queries[0].Select) {
 			if item.Key != item.Expr {
 				preAsMap[item.Key] = strings.ReplaceAll(item.Expr, "`", "")
 			}
@@ -571,7 +569,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			}
 		}
 	}
-	return &QueryTopResult{
+	return &clickhouse.QueryTopResult{
 		Data:   resultRows,
 		Fields: schemas,
 	}, nil

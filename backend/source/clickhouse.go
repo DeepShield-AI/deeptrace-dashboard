@@ -10,6 +10,8 @@ import (
 	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/enum"
 	"deeptrace-backend/query"
+	"deeptrace-backend/query/top"
+	"deeptrace-backend/query/tracemap"
 )
 
 // CHDataSource wraps CHService as a DataSource for the priority chain.
@@ -93,7 +95,7 @@ func (d *CHDataSource) QueryTop(ctx context.Context, req *query.QuerierListReque
 		return nil, nil
 	}
 	chReq := toCHRequest(req)
-	result, err := d.ch.QueryTop(ctx, chReq)
+	result, err := top.QueryTop(d.ch, ctx, chReq)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +153,7 @@ func (d *CHDataSource) QueryTraceMap(ctx context.Context, req *query.QuerierList
 	if d.ch == nil || !d.ch.Enabled() {
 		return nil, nil
 	}
-	result, err := d.ch.QueryTraceMap(ctx, req.TimeStart, req.TimeEnd, "")
+	result, err := tracemap.QueryTraceMap(d.ch, ctx, req.TimeStart, req.TimeEnd, "")
 	if err != nil {
 		return nil, err
 	}

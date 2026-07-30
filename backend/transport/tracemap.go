@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"deeptrace-backend/query"
+	"deeptrace-backend/query/tracemap"
 )
 
 // RegisterTraceMap registers the TraceMap endpoint.
@@ -38,7 +39,7 @@ func handleTraceMap(srv *query.QuerierService) http.HandlerFunc {
 
 		// Path 1: Try ClickHouse directly (fast path, best format).
 		if srv.CH != nil && srv.CH.Enabled() {
-			chResult, chErr := srv.CH.QueryTraceMap(r.Context(), tReq.TimeStart, tReq.TimeEnd, tReq.QueryCondition)
+			chResult, chErr := tracemap.QueryTraceMap(srv.CH, r.Context(), tReq.TimeStart, tReq.TimeEnd, tReq.QueryCondition)
 			if chErr != nil {
 				log.Printf("⚠️  TraceMap CH error: %v", chErr)
 			}
