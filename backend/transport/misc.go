@@ -32,7 +32,31 @@ func RegisterMisc(mux *http.ServeMux, deps *Dependencies) {
 		})
 	})
 	mux.HandleFunc("/api/df-web/v1/indicator_template", func(w http.ResponseWriter, r *http.Request) {
-		writeSuccess(w, []interface{}{})
+		tableName := r.URL.Query().Get("table_name")
+		dbName := r.URL.Query().Get("db_name")
+		if tableName == "" {
+			tableName = "application"
+		}
+		if dbName == "" {
+			dbName = "flow_metrics"
+		}
+		writeSuccess(w, []interface{}{
+			map[string]interface{}{
+				"ID":              1,
+				"LCUUID":          "00000000-0000-0000-0000-000000000001",
+				"TEMPLATE_NAME":   "常用模板",
+				"TABLE_NAME":      tableName,
+				"DB_NAME":         dbName,
+				"DEF_TEMP":        0,
+				"USER_ID":         1,
+				"CREATED_AT":      "2025-01-01 00:00:00",
+				"UPDATED_AT":      "2025-01-01 00:00:00",
+				"TEAM_INFO":       map[string]interface{}{"current_role": 4, "name": "Default", "team_id": 1},
+				"TEAM_ID":         1,
+				"OWNER_USER_INFO": map[string]interface{}{"ID": 1, "USERNAME": "admin"},
+				"ACCESS_ACTIONS":  []string{"read"},
+			},
+		})
 	})
 	mux.HandleFunc("/api/df-web/v1/logo_info", func(w http.ResponseWriter, r *http.Request) {
 		writeSuccess(w, map[string]interface{}{"LOGO_URL": "", "FAVICON_URL": "", "TITLE": "DeepTrace"})
@@ -412,9 +436,47 @@ func chQueryFastList(deps *Dependencies, db, tbl, selStr string, extras []string
 	if deps.CH == nil || !deps.CH.Enabled() {
 		return nil
 	}
-	// Build a ClickHouse-compatible SQL. Use count(*) to avoid ZT's Count(row) limitation.
-	// Strip DeepFlow DSL functions (Enum, node_type, etc.) for CH compatibility.
+	// Build a ClickHouse-compatible SQL.
 	chSel := normalizeFastListSelect(selStr)
+	// Map virtual tag names to real ClickHouse columns (matching ZT behavior).
+	chSelParts := strings.Split(chSel, ",")
+	for i, p := range chSelParts {
+		p = strings.TrimSpace(p)
+		// Virtual tag → real ID column mapping (same as topColMap/flowLogColMap for flow_log).
+		switch p {
+		case "pod_node_1": chSelParts[i] = "pod_node_id_1"
+		case "pod_node_0": chSelParts[i] = "pod_node_id_0"
+		case "pod_ns_1": chSelParts[i] = "pod_ns_id_1"
+		case "pod_ns_0": chSelParts[i] = "pod_ns_id_0"
+		case "pod_cluster_1": chSelParts[i] = "pod_cluster_id_1"
+		case "pod_cluster_0": chSelParts[i] = "pod_cluster_id_0"
+		case "pod_service_1": chSelParts[i] = "pod_service_id_1"
+		case "pod_service_0": chSelParts[i] = "pod_service_id_0"
+		case "pod_group_1": chSelParts[i] = "pod_group_id_1"
+		case "pod_group_0": chSelParts[i] = "pod_group_id_0"
+		case "pod_1": chSelParts[i] = "pod_id_1"
+		case "pod_0": chSelParts[i] = "pod_id_0"
+		case "region_1": chSelParts[i] = "region_id_1"
+		case "region_0": chSelParts[i] = "region_id_0"
+		case "az_1": chSelParts[i] = "az_id_1"
+		case "az_0": chSelParts[i] = "az_id_0"
+		case "chost_1": chSelParts[i] = "l3_device_id_1"
+		case "chost_0": chSelParts[i] = "l3_device_id_0"
+		case "vpc_1": chSelParts[i] = "epc_id_1"
+		case "vpc_0": chSelParts[i] = "epc_id_0"
+		case "subnet_1": chSelParts[i] = "subnet_id_1"
+		case "subnet_0": chSelParts[i] = "subnet_id_0"
+		case "router_1": chSelParts[i] = "router_id_1"
+		case "router_0": chSelParts[i] = "router_id_0"
+		case "lb_1": chSelParts[i] = "lb_id_1"
+		case "lb_0": chSelParts[i] = "lb_id_0"
+		case "gprocess_1": chSelParts[i] = "gprocess_id_1"
+		case "gprocess_0": chSelParts[i] = "gprocess_id_0"
+		case "service_1": chSelParts[i] = "service_id_1"
+		case "service_0": chSelParts[i] = "service_id_0"
+		}
+	}
+	chSel = strings.Join(chSelParts, ", ")
 	sel := fmt.Sprintf("%s, count(*) AS count_row", chSel)
 	groupBy := chSel
 	// Build SQL with `db`.`table` prefix for ClickHouse.
