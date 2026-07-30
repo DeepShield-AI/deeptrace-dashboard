@@ -104,10 +104,10 @@ func QueryList(zt *client.ZerotraceService, enumSvc *enum.EnumService, bodyStr s
 				lowCol := strings.ToLower(col)
 				if lowCol == "is_async" || lowCol == "is_tls" || lowCol == "role" ||
 					strings.HasPrefix(lowCol, "gprocess.biz_type") ||
-					strings.HasPrefix(lowCol, "k8s.label_") || strings.HasPrefix(lowCol, "k8s.annotation_") ||
-					strings.HasPrefix(lowCol, "k8s.env_") || strings.HasPrefix(lowCol, "cloud.tag_") ||
-					strings.HasPrefix(lowCol, "os.app_") || lowCol == "attribute" ||
-					strings.HasPrefix(lowCol, "process_") || strings.HasPrefix(lowCol, "x_request_") {
+					strings.HasPrefix(lowCol, "k8s.annotation_") ||
+					strings.HasPrefix(lowCol, "cloud.tag_") ||
+					lowCol == "attribute" ||
+					false { // process_/x_request_ now mapped to process_id_/x_request_id_
 					cleanKey := strings.Trim(key, "`")
 					cols = append(cols, fmt.Sprintf("'' AS `%s`", cleanKey))
 					continue
@@ -123,6 +123,34 @@ func QueryList(zt *client.ZerotraceService, enumSvc *enum.EnumService, bodyStr s
 						col = "epc_id_0"
 					case "epc_1":
 						col = "epc_id_1"
+					case "process_0":
+						col = "process_id_0"
+					case "process_1":
+						col = "process_id_1"
+					case "x_request_0":
+						col = "x_request_id_0"
+					case "x_request_1":
+						col = "x_request_id_1"
+					case "k8s.label_0":
+						col = "pod_id_0"
+					case "k8s.label_1":
+						col = "pod_id_1"
+					case "k8s.annotation_0":
+						col = "pod_service_id_0"
+					case "k8s.annotation_1":
+						col = "pod_service_id_1"
+					case "k8s.env_0":
+						col = "pod_id_0"
+					case "k8s.env_1":
+						col = "pod_id_1"
+					case "cloud.tag_0":
+						col = "l3_device_id_0"
+					case "cloud.tag_1":
+						col = "l3_device_id_1"
+					case "os.app_0":
+						col = "gprocess_id_0"
+					case "os.app_1":
+						col = "gprocess_id_1"
 					}
 				}
 

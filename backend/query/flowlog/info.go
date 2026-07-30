@@ -83,10 +83,10 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 				lowCol := strings.ToLower(col)
 				if lowCol == "is_async" || lowCol == "is_tls" || lowCol == "role" ||
 					strings.HasPrefix(lowCol, "gprocess.biz_type") ||
-					strings.HasPrefix(lowCol, "k8s.label_") || strings.HasPrefix(lowCol, "k8s.annotation_") ||
-					strings.HasPrefix(lowCol, "k8s.env_") || strings.HasPrefix(lowCol, "cloud.tag_") ||
-					strings.HasPrefix(lowCol, "os.app_") || lowCol == "attribute" ||
-					strings.HasPrefix(lowCol, "process_") || strings.HasPrefix(lowCol, "x_request_") {
+					strings.HasPrefix(lowCol, "k8s.annotation_") ||
+					strings.HasPrefix(lowCol, "cloud.tag_") ||
+					lowCol == "attribute" ||
+					false { // process_/x_request_ now mapped to process_id_/x_request_id_
 					cleanKey := strings.Trim(key, "`")
 					cols = append(cols, fmt.Sprintf("'' AS `%s`", cleanKey))
 					continue
@@ -107,6 +107,14 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 						col = "epc_id_0"
 					case "epc_1":
 						col = "epc_id_1"
+					case "process_0":
+						col = "process_id_0"
+					case "process_1":
+						col = "process_id_1"
+					case "x_request_0":
+						col = "x_request_id_0"
+					case "x_request_1":
+						col = "x_request_id_1"
 					}
 				}
 

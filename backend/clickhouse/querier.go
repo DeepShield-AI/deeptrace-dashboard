@@ -369,6 +369,18 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			"service_0": "any(dictGetOrDefault('flow_tag.biz_service_map', 'name', toUInt64(biz_service_id_0), ''))", "service_1": "any(dictGetOrDefault('flow_tag.biz_service_map', 'name', toUInt64(biz_service_id_1), ''))",
 			"gprocess_0": "gprocess_id_0", "gprocess_1": "gprocess_id_1",
 			"tap_port": "tap_port", "vtap": "vtap_id", "agent": "agent_id",
+			// Computed virtual columns.
+			"is_internet_0": "any(if(is_ipv4=1 AND (startsWith(IPv4NumToString(ip4_0),'10.') OR startsWith(IPv4NumToString(ip4_0),'172.1') OR startsWith(IPv4NumToString(ip4_0),'172.2') OR startsWith(IPv4NumToString(ip4_0),'172.3') OR startsWith(IPv4NumToString(ip4_0),'192.168.') OR startsWith(IPv4NumToString(ip4_0),'127.') OR startsWith(IPv4NumToString(ip4_0),'100.6') OR startsWith(IPv4NumToString(ip4_0),'100.7') OR startsWith(IPv4NumToString(ip4_0),'100.8') OR startsWith(IPv4NumToString(ip4_0),'100.9') OR startsWith(IPv4NumToString(ip4_0),'100.10') OR startsWith(IPv4NumToString(ip4_0),'100.11') OR startsWith(IPv4NumToString(ip4_0),'100.12')),0,1))",
+			"is_internet_1": "any(if(is_ipv4=1 AND (startsWith(IPv4NumToString(ip4_1),'10.') OR startsWith(IPv4NumToString(ip4_1),'172.1') OR startsWith(IPv4NumToString(ip4_1),'172.2') OR startsWith(IPv4NumToString(ip4_1),'172.3') OR startsWith(IPv4NumToString(ip4_1),'192.168.') OR startsWith(IPv4NumToString(ip4_1),'127.') OR startsWith(IPv4NumToString(ip4_1),'100.6') OR startsWith(IPv4NumToString(ip4_1),'100.7') OR startsWith(IPv4NumToString(ip4_1),'100.8') OR startsWith(IPv4NumToString(ip4_1),'100.9') OR startsWith(IPv4NumToString(ip4_1),'100.10') OR startsWith(IPv4NumToString(ip4_1),'100.11') OR startsWith(IPv4NumToString(ip4_1),'100.12')),0,1))",
+			"role": "0",
+			"process_0": "process_id_0", "process_1": "process_id_1",
+			"x_request_0": "x_request_id_0", "x_request_1": "x_request_id_1",
+			"k8s.label_0": "any(dictGetOrDefault('flow_tag.pod_k8s_labels_map', 'labels', toUInt64(pod_id_0), ''))",
+			"k8s.label_1": "any(dictGetOrDefault('flow_tag.pod_k8s_labels_map', 'labels', toUInt64(pod_id_1), ''))",
+			"cloud.tag_0": "any(dictGetOrDefault('flow_tag.chost_cloud_tags_map', 'cloud_tags', toUInt64(l3_device_id_0), ''))",
+			"cloud.tag_1": "any(dictGetOrDefault('flow_tag.chost_cloud_tags_map', 'cloud_tags', toUInt64(l3_device_id_1), ''))",
+			"os.app_0": "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_0), ''))",
+			"os.app_1": "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_1), ''))",
 		}
 	}
 
@@ -398,7 +410,6 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	flowLogSkipCols := map[string]bool{}
 	if isFlowLog {
 		flowLogSkipCols = map[string]bool{
-			"is_internet_0": true, "is_internet_1": true,
 			"_0": true, "_1": true,
 		}
 	}
@@ -514,7 +525,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		}
 	}
 
-	if len(tagCols) > 0 {
+	if len(tagCols) > 0 && len(groupCols) > 0 {
 		groupSQL := fmt.Sprintf("SELECT %s, %s FROM %s%s GROUP BY %s",
 			strings.Join(metricSelects, ", "), strings.Join(tagCols, ", "),
 			fullTable, whereClause, strings.Join(groupCols, ", "))
