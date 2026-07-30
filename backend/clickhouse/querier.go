@@ -2,13 +2,13 @@ package clickhouse
 
 import (
 	"context"
+	"deeptrace-backend/engine"
 	"encoding/json"
 	"fmt"
 	"log"
 	"sort"
 	"strings"
 	"time"
-	"deeptrace-backend/engine"
 )
 
 // metricExpr holds a parsed metric expression for Top queries.
@@ -178,6 +178,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	q := req.Queries[0]
 	items := ParseSelectList(q.Select)
 
+	constKeys := map[string]bool{}
 	var metricExprs []metricExpr
 	isFlowLog := db == "flow_log"
 	isFlowMetrics := db == "flow_metrics"
@@ -202,10 +203,12 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			strings.HasPrefix(lower, "icon_id(") ||
 			strings.HasPrefix(lower, "node_type(") ||
 			strings.HasPrefix(lower, "enum(") {
+			constKeys[item.Key] = true
 			continue
 		}
 
 		if _, err := fmt.Sscanf(item.Expr, "%f", new(float64)); err == nil {
+			constKeys[item.Key] = true
 			continue
 		}
 
@@ -220,10 +223,10 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 				// server_error/client_error columns don't exist; use response_status.
 				sqlExpr = strings.ReplaceAll(sqlExpr, "nullif(server_error, 0) / nullif(request, 0)", "if(response_status >= 500, 1, 0)")
 				sqlExpr = strings.ReplaceAll(sqlExpr, "nullif(client_error, 0) / nullif(request, 0)", "if(response_status >= 400 AND response_status < 500, 1, 0)")
-			// request column doesn't exist in flow_log; each row is one request.
-			sqlExpr = strings.ReplaceAll(sqlExpr, "avg(request)", "count(*)")
-			sqlExpr = strings.ReplaceAll(sqlExpr, "sum(request)", "count(*)")
-			sqlExpr = strings.ReplaceAll(sqlExpr, "`request`", "1")
+				// request column doesn't exist in flow_log; each row is one request.
+				sqlExpr = strings.ReplaceAll(sqlExpr, "avg(request)", "count(*)")
+				sqlExpr = strings.ReplaceAll(sqlExpr, "sum(request)", "count(*)")
+				sqlExpr = strings.ReplaceAll(sqlExpr, "`request`", "1")
 
 				cleanExpr := strings.ToLower(strings.ReplaceAll(item.Expr, "`", ""))
 				if !strings.Contains(cleanExpr, "rrt") && !strings.Contains(cleanExpr, "rtt") &&
@@ -311,7 +314,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	}
 	log.Printf("CH QueryTop OK: %d rows", len(data))
 
-		topColMap := map[string]string{
+	topColMap := map[string]string{
 		"auto_service":    "app_service",
 		"auto_instance":   "app_instance",
 		"auto_instance_0": "auto_instance_id_0",
@@ -331,7 +334,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		// Common resource tag _0/_1 mappings (flow_metrics: shared column for both sides).
 	}
 
-			// flow_log-specific column mappings for DeepFlow field names.
+	// flow_log-specific column mappings for DeepFlow field names.
 	flowLogColMap := map[string]string{}
 	if isFlowLog {
 		flowLogColMap = map[string]string{
@@ -369,16 +372,15 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		}
 	}
 
-	
 	// flow_metrics-specific: _0/_1 both map to same shared column.
 	flowMetricsColMap := map[string]string{}
 	if isFlowMetrics {
 		flowMetricsColMap = map[string]string{
-			"auto_service_0":   "app_service",
-			"auto_service_1":   "app_service",
-			"auto_instance_0":  "app_instance",
-			"auto_instance_1":  "app_instance",
-			"chost_0": "l3_device_id", "chost_1": "l3_device_id",
+			"auto_service_0":  "app_service",
+			"auto_service_1":  "app_service",
+			"auto_instance_0": "app_instance",
+			"auto_instance_1": "app_instance",
+			"chost_0":         "l3_device_id", "chost_1": "l3_device_id",
 			"region_0": "region_id", "region_1": "region_id",
 			"az_0": "az_id", "az_1": "az_id",
 			"subnet_0": "subnet_id", "subnet_1": "subnet_id",
@@ -483,6 +485,10 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			continue
 		}
 		if isFlowLog && flowLogSkipCols[gb] {
+			continue
+		}
+		// Skip constants and function aliases (newTag('x'), node_type('x'), -42, etc.)
+		if constKeys[gb] {
 			continue
 		}
 		mappedCol := gb
@@ -672,11 +678,11 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 				vt, tp = "Float64", 1
 			case int, int64, uint64:
 				vt, tp = "UInt64", 1
-			// icon_id is always a tag (even when value is int like -42).
-			if strings.Contains(strings.ToLower(k), "icon_id") {
-				tp = 0
-				vt = "String"
-			}
+				// icon_id is always a tag (even when value is int like -42).
+				if strings.Contains(strings.ToLower(k), "icon_id") {
+					tp = 0
+					vt = "String"
+				}
 			}
 			preAs := ""
 			if p, ok := preAsMap[k]; ok {
@@ -752,8 +758,8 @@ func (s *CHService) QueryFlowLogDetail(ctx context.Context, bodyStr string) (*Qu
 	if len(req.Queries) > 0 && req.Queries[0].Select != "" {
 		items := ParseSelectList(req.Queries[0].Select)
 		var cols []string
-		for _, item := range items {
-			lower := strings.ToLower(item.Expr)
+	for _, item := range items {
+		lower := strings.ToLower(item.Expr)
 			switch {
 			case strings.HasPrefix(lower, "newtag("):
 				continue
@@ -899,19 +905,19 @@ type endpointStat struct {
 // tmKey and tmAgg are used by QueryTraceMap for service-level aggregation.
 type tmKey struct{ id, typ float64 }
 type tmAgg struct {
-	name           string
-	parentIDs      map[tmKey]bool
-	childIDs       map[tmKey]bool
-	total          float64
-	responseTotal  float64
-	durationSum    float64
-	successCount   float64
-	serverErrCount float64
-	signalSource   float64
-	obsPoint       string
-	ip             string
-	serverEndpoints []string      // endpoints this service serves (as server, endpoints_1)
-	clientEndpoints []string      // endpoints this service calls (as client, endpoints_0)
+	name            string
+	parentIDs       map[tmKey]bool
+	childIDs        map[tmKey]bool
+	total           float64
+	responseTotal   float64
+	durationSum     float64
+	successCount    float64
+	serverErrCount  float64
+	signalSource    float64
+	obsPoint        string
+	ip              string
+	serverEndpoints []string // endpoints this service serves (as server, endpoints_1)
+	clientEndpoints []string // endpoints this service calls (as client, endpoints_0)
 	gprocessIDs     map[string]interface{}
 	epStats         map[string]endpointStat
 }
@@ -935,7 +941,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 
 	// Query unique trace counts (total and calculated/completed).
 	traceCountSQL := fmt.Sprintf(
-		"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log_local WHERE %s", whereSQL)
+		"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log WHERE %s", whereSQL)
 	var totalTraceCount, calcTraceCount int64
 	if rows2, err2 := s.Query(qCtx, traceCountSQL); err2 == nil {
 		if td, e2 := ScanRows(rows2); e2 == nil && len(td) > 0 {
@@ -971,7 +977,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 			CountIf(response_status = 0) AS response_success_count,
 			CountIf(response_status = 3 OR response_status = 5) AS response_status_server_error_count,
 			Avg(response_duration) AS avg_response_duration
-		FROM flow_log.l7_flow_log_local
+		FROM flow_log.l7_flow_log
 		WHERE %s
 		GROUP BY
 			auto_service_id_0, auto_service_type_0,
@@ -1008,7 +1014,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 			any(response_code) AS response_code,
 			any(response_exception) AS response_exception,
 			any(response_status) AS response_status
-		FROM flow_log.l7_flow_log_local
+		FROM flow_log.l7_flow_log
 		WHERE %s
 		GROUP BY
 			auto_service_id_0, auto_service_type_0,
@@ -1243,11 +1249,19 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 		}
 		// Limit endpoints to top 5 by total count (matching cloud behavior).
 		sort.Slice(uniqueServerEPs, func(i, j int) bool {
-			ti := float64(0); if s, ok := agg.epStats[uniqueServerEPs[i]]; ok { ti = s.total }
-			tj := float64(0); if s, ok := agg.epStats[uniqueServerEPs[j]]; ok { tj = s.total }
+			ti := float64(0)
+			if s, ok := agg.epStats[uniqueServerEPs[i]]; ok {
+				ti = s.total
+			}
+			tj := float64(0)
+			if s, ok := agg.epStats[uniqueServerEPs[j]]; ok {
+				tj = s.total
+			}
 			return ti > tj
 		})
-		if len(uniqueServerEPs) > 5 { uniqueServerEPs = uniqueServerEPs[:5] }
+		if len(uniqueServerEPs) > 5 {
+			uniqueServerEPs = uniqueServerEPs[:5]
+		}
 
 		// Build endpoint_stats for server side (endpoints_1)
 		var serverEndpointStats []interface{}
@@ -1265,21 +1279,29 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 				epTotal = stats.total
 			}
 			serverEndpointStats = append(serverEndpointStats, map[string]interface{}{
-				"biz_response_code":    bizCode,
-				"response_exception":   respExc,
-				"response_code":        respCode,
-				"total":                epTotal,
-				"response_status":      respStat,
+				"biz_response_code":  bizCode,
+				"response_exception": respExc,
+				"response_code":      respCode,
+				"total":              epTotal,
+				"response_status":    respStat,
 			})
 		}
 		// Keep nil as nil for JSON null (matching cloud behavior).
 		// Limit endpoints to top 5 by total count (matching cloud behavior).
 		sort.Slice(uniqueClientEPs, func(i, j int) bool {
-			ti := float64(0); if s, ok := agg.epStats[uniqueClientEPs[i]]; ok { ti = s.total }
-			tj := float64(0); if s, ok := agg.epStats[uniqueClientEPs[j]]; ok { tj = s.total }
+			ti := float64(0)
+			if s, ok := agg.epStats[uniqueClientEPs[i]]; ok {
+				ti = s.total
+			}
+			tj := float64(0)
+			if s, ok := agg.epStats[uniqueClientEPs[j]]; ok {
+				tj = s.total
+			}
 			return ti > tj
 		})
-		if len(uniqueClientEPs) > 5 { uniqueClientEPs = uniqueClientEPs[:5] }
+		if len(uniqueClientEPs) > 5 {
+			uniqueClientEPs = uniqueClientEPs[:5]
+		}
 
 		// Build endpoint_stats for client side (endpoints_0)
 		var clientEndpointStats []interface{}
@@ -1297,11 +1319,11 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 				epTotal = stats.total
 			}
 			clientEndpointStats = append(clientEndpointStats, map[string]interface{}{
-				"biz_response_code":    bizCode,
-				"response_exception":   respExc,
-				"response_code":        respCode,
-				"total":                epTotal,
-				"response_status":      respStat,
+				"biz_response_code":  bizCode,
+				"response_exception": respExc,
+				"response_code":      respCode,
+				"total":              epTotal,
+				"response_status":    respStat,
 			})
 		}
 		// Keep nil as nil for JSON null (matching cloud behavior).
@@ -1320,36 +1342,36 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 		// (populated from parent_node_infos in step 4)
 
 		node := map[string]interface{}{
-			"level":                     levelOf[sk],
-			"signal_source":             agg.signalSource,
-			"response_code":             float64(0),
-			"response_status":           float64(0),
-			"response_exception":        "",
-			"biz_response_code":         "",
-			"auto_service_type":         sk.typ,
-			"auto_service_id":           sk.id,
-			"icon_id":                   iconID,
-			"ip":                        agg.ip,
-			"uid":                       uid,
-			"node_type":                 nodeType,
-			"app_service":               agg.name,
-			"service_uid":               serviceUID,
-			"auto_service":              agg.name,
+			"level":              levelOf[sk],
+			"signal_source":      agg.signalSource,
+			"response_code":      float64(0),
+			"response_status":    float64(0),
+			"response_exception": "",
+			"biz_response_code":  "",
+			"auto_service_type":  sk.typ,
+			"auto_service_id":    sk.id,
+			"icon_id":            iconID,
+			"ip":                 agg.ip,
+			"uid":                uid,
+			"node_type":          nodeType,
+			"app_service":        agg.name,
+			"service_uid":        serviceUID,
+			"auto_service":       agg.name,
 			// (auto_service kept as-is; IP fallback is done in cloud but requires IP per edge)
-			"_querier_region":           "本地",
-			"observation_point":         agg.obsPoint,
-			"parent_node_infos":         []interface{}{},
+			"_querier_region":   "本地",
+			"observation_point": agg.obsPoint,
+			"parent_node_infos": []interface{}{},
 
 			// Endpoints at node level
-			"endpoints_0":               clientEPsList,
-			"endpoints_1":               serverEPsList,
-			"endpoint_stats_0":          clientEndpointStats,
-			"endpoint_stats_1":          serverEndpointStats,
+			"endpoints_0":      clientEPsList,
+			"endpoints_1":      serverEPsList,
+			"endpoint_stats_0": clientEndpointStats,
+			"endpoint_stats_1": serverEndpointStats,
 
 			// Trace IDs as dict (cloud format)
-			"trace_ids":                 traceIDsMap,
-			"abnormal_trace_ids":        map[string]interface{}{},
-			"gprocess_ids":              agg.gprocessIDs,
+			"trace_ids":          traceIDsMap,
+			"abnormal_trace_ids": map[string]interface{}{},
+			"gprocess_ids":       agg.gprocessIDs,
 
 			// Aggregated metrics
 			"total":                              total,
@@ -1394,7 +1416,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 	// -----------------------------------------------------------------------
 	// Step 4: Build parent_node_infos edges (cloud-compatible format).
 	// -----------------------------------------------------------------------
-for _, row := range allData {
+	for _, row := range allData {
 		sk0 := tmKey{GetF64(row, "auto_service_id_0"), GetF64(row, "auto_service_type_0")}
 		sk1 := tmKey{GetF64(row, "auto_service_id_1"), GetF64(row, "auto_service_type_1")}
 		if sk0 == sk1 {
@@ -1518,27 +1540,27 @@ for _, row := range allData {
 			"avg_success_ratio":                  successRatio,
 			"uniq_parent_span_infos": []interface{}{
 				map[string]interface{}{
-					"signal_source":              GetF64(row, "signal_source"),
-					"auto_service_type_0":        GetF64(row, "auto_service_type_0"),
-					"auto_service_type_1":        GetF64(row, "auto_service_type_1"),
-					"auto_service_id_0":          GetF64(row, "auto_service_id_0"),
-					"auto_service_id_1":          GetF64(row, "auto_service_id_1"),
-					"client_icon_id":             engine.IconFor(int(GetF64(row, "auto_service_type_0"))),
-					"server_icon_id":             engine.IconFor(int(GetF64(row, "auto_service_type_1"))),
-					"observation_point":          obsPt,
-					"ip_0":                       GetStr(row, "ip4_0"),
-					"ip_1":                       GetStr(row, "ip4_1"),
-					"app_service_0":              GetStr(row, "auto_service_name_0"),
-					"app_service_1":              GetStr(row, "auto_service_name_1"),
-					"auto_service_0":             GetStr(row, "auto_service_name_0"),
-					"auto_service_1":             GetStr(row, "auto_service_name_1"),
-					"client_node_type":           engine.NodeTypeFor(int(GetF64(row, "auto_service_type_0"))),
-					"server_node_type":           engine.NodeTypeFor(int(GetF64(row, "auto_service_type_1"))),
-					"_querier_region":            "本地",
-					"endpoints":                  endpointsList,
-					"endpoint_stats":             endpointStats,
-					"trace_ids":                  traceIDsList,
-					"abnormal_trace_ids":         abnormalIDsList,
+					"signal_source":               GetF64(row, "signal_source"),
+					"auto_service_type_0":         GetF64(row, "auto_service_type_0"),
+					"auto_service_type_1":         GetF64(row, "auto_service_type_1"),
+					"auto_service_id_0":           GetF64(row, "auto_service_id_0"),
+					"auto_service_id_1":           GetF64(row, "auto_service_id_1"),
+					"client_icon_id":              engine.IconFor(int(GetF64(row, "auto_service_type_0"))),
+					"server_icon_id":              engine.IconFor(int(GetF64(row, "auto_service_type_1"))),
+					"observation_point":           obsPt,
+					"ip_0":                        GetStr(row, "ip4_0"),
+					"ip_1":                        GetStr(row, "ip4_1"),
+					"app_service_0":               GetStr(row, "auto_service_name_0"),
+					"app_service_1":               GetStr(row, "auto_service_name_1"),
+					"auto_service_0":              GetStr(row, "auto_service_name_0"),
+					"auto_service_1":              GetStr(row, "auto_service_name_1"),
+					"client_node_type":            engine.NodeTypeFor(int(GetF64(row, "auto_service_type_0"))),
+					"server_node_type":            engine.NodeTypeFor(int(GetF64(row, "auto_service_type_1"))),
+					"_querier_region":             "本地",
+					"endpoints":                   endpointsList,
+					"endpoint_stats":              endpointStats,
+					"trace_ids":                   traceIDsList,
+					"abnormal_trace_ids":          abnormalIDsList,
 					"inferred_application_type_0": nil,
 					"inferred_application_type_1": nil,
 				},
@@ -1547,7 +1569,7 @@ for _, row := range allData {
 		nodes[idx1]["parent_node_infos"] = append(par, parentInfo)
 	}
 
-return &QueryTraceMapResult{
+	return &QueryTraceMapResult{
 		Data:             nodes,
 		TotalTraces:      int(totalTraceCount),
 		CalculatedTraces: int(calcTraceCount),
@@ -1555,7 +1577,6 @@ return &QueryTraceMapResult{
 }
 
 // strList converts []interface{} of strings to []string for easier processing.
-
 
 func strList(arr []interface{}) []string {
 	if arr == nil {
@@ -1575,8 +1596,6 @@ func strList(arr []interface{}) []string {
 	return result
 }
 
-
-
 // getOrCreate returns an existing serviceAgg or creates a new one.
 func getOrCreate(m map[tmKey]*tmAgg, key tmKey, name string) *tmAgg {
 	if a, ok := m[key]; ok {
@@ -1586,11 +1605,11 @@ func getOrCreate(m map[tmKey]*tmAgg, key tmKey, name string) *tmAgg {
 		return a
 	}
 	a := &tmAgg{
-		name:          name,
-		parentIDs:     map[tmKey]bool{},
-		childIDs:      map[tmKey]bool{},
-		gprocessIDs:    map[string]interface{}{},
-		epStats:        map[string]endpointStat{},
+		name:        name,
+		parentIDs:   map[tmKey]bool{},
+		childIDs:    map[tmKey]bool{},
+		gprocessIDs: map[string]interface{}{},
+		epStats:     map[string]endpointStat{},
 	}
 	m[key] = a
 	return a
@@ -1617,7 +1636,6 @@ func convertHistory(hist []map[string]interface{}, metrics []metricExpr) []map[s
 func quoteCH(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
 }
-
 
 // fillNullHistory fills gaps in time-series history data with null entries.
 func fillNullHistory(hist []map[string]interface{}, interval, timeStart, timeEnd int64, fill string, metrics []metricExpr) []map[string]interface{} {
