@@ -8,30 +8,28 @@ import (
 	"deeptrace-backend/clickhouse"
 )
 
-type svcKey struct{ id, typ string }
-
-// dimReq mirrors the dimension-resources request body.
-type dimReq struct {
-	Database  string
-	Table     string
-	TimeStart int64
-	TimeEnd   int64
-	Region    string
+type SvcKey struct{ id, typ string }
+type DimReq struct {
+	Database  string `json:"DATABASE"`
+	Table     string `json:"TABLE"`
+	TimeStart int64  `json:"time_start"`
+	TimeEnd   int64  `json:"time_end"`
+	Region    string `json:"REGION"`
 	Queries   []struct {
 		Where  string `json:"WHERE"`
 		Select string `json:"SELECT"`
 		TOP    int    `json:"TOP"`
-	}
+	} `json:"QUERIES"`
 }
 
-// resourceEntry holds a resource ID + NAME pair.
-type resourceEntry struct {
-	ID   interface{}
-	Name string
+type ResourceEntry struct {
+	ID   interface{} `json:"ID"`
+	Name string      `json:"NAME"`
 }
 
-func queryDimensionResources(ch *clickhouse.CHService, req dimReq) map[string]interface{} {
-	result := emptyDimensionResult()
+
+func QueryDimensionResources(ch *clickhouse.CHService, req DimReq) map[string]interface{} {
+	result := EmptyDimensionResult()
 
 	if ch == nil || !ch.Enabled() {
 		return result
@@ -39,12 +37,12 @@ func queryDimensionResources(ch *clickhouse.CHService, req dimReq) map[string]in
 
 	// Extract service ID and type from WHERE clause.
 	// WHERE format: "(auto_service_id_0=X AND auto_service_type_0=Y) OR (...)"
-	svcIDs := extractServiceIDs(req.Queries)
+	svcIDs := ExtractServiceIDs(req.Queries)
 
 	// If no service IDs found, try extracting IP from WHERE clause.
 	// WHERE format: "(subnet_id_0=0 AND ip_0='1.2.3.4') OR (subnet_id_1=0 AND ip_1='1.2.3.4')"
 	if len(svcIDs) == 0 {
-		ip := extractIPFromWhere(req.Queries)
+		ip := ExtractIPFromWhere(req.Queries)
 		if ip != "" {
 			result["IP_NUM"] = 1
 			result["IPS"] = []string{ip}
@@ -58,11 +56,11 @@ func queryDimensionResources(ch *clickhouse.CHService, req dimReq) map[string]in
 	ctx := context.Background()
 
 	// Build a set of (service_id, service_type) pairs.
-	var svcKeys []svcKey
+	var svcKeys []SvcKey
 	for _, s := range svcIDs {
 		parts := strings.Split(s, ":")
 		if len(parts) == 2 {
-			svcKeys = append(svcKeys, svcKey{parts[0], parts[1]})
+			svcKeys = append(svcKeys, SvcKey{parts[0], parts[1]})
 		}
 	}
 	if len(svcKeys) == 0 {
@@ -71,53 +69,53 @@ func queryDimensionResources(ch *clickhouse.CHService, req dimReq) map[string]in
 
 	// Query flow_tag mapping tables for each resource type.
 	// Use the service ID to filter related resources via service_id columns.
-	if rows := queryMapTable(ch, ctx, "region_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "region_map", "id", "name"); len(rows) > 0 {
 		result["REGION_NUM"] = len(rows)
 		result["REGIONS"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "az_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "az_map", "id", "name"); len(rows) > 0 {
 		result["AZ_NUM"] = len(rows)
 		result["AZS"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "l3_epc_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "l3_epc_map", "id", "name"); len(rows) > 0 {
 		result["VPC_NUM"] = len(rows)
 		result["VPCS"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "subnet_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "subnet_map", "id", "name"); len(rows) > 0 {
 		result["SUBNET_NUM"] = len(rows)
 		result["SUBNETS"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "chost_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "chost_map", "id", "name"); len(rows) > 0 {
 		result["CHOST_NUM"] = len(rows)
 		result["CHOSTS"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "pod_cluster_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "pod_cluster_map", "id", "name"); len(rows) > 0 {
 		result["POD_CLUSTER_NUM"] = len(rows)
 		result["POD_CLUSTERS"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "pod_ns_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "pod_ns_map", "id", "name"); len(rows) > 0 {
 		result["POD_NS_NUM"] = len(rows)
 		result["POD_NSES"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "pod_node_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "pod_node_map", "id", "name"); len(rows) > 0 {
 		result["POD_NODE_NUM"] = len(rows)
 		result["POD_NODES"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "pod_service_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "pod_service_map", "id", "name"); len(rows) > 0 {
 		result["POD_SERVICE_NUM"] = len(rows)
 		result["POD_SERVICES"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "pod_group_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "pod_group_map", "id", "name"); len(rows) > 0 {
 		result["POD_GROUP_NUM"] = len(rows)
 		result["POD_GROUPS"] = rows
 	}
-	if rows := queryMapTable(ch, ctx, "pod_map", "id", "name"); len(rows) > 0 {
+	if rows := QueryMapTable(ch, ctx, "pod_map", "id", "name"); len(rows) > 0 {
 		result["POD_NUM"] = len(rows)
 		result["PODS"] = rows
 	}
 
 	// For IPs, query distinct IPs from the data table related to the service.
-	if ips := queryServiceIPs(ch, ctx, svcKeys, req.Database, req.Table); len(ips) > 0 {
+	if ips := QueryServiceIPs(ch, ctx, svcKeys, req.Database, req.Table); len(ips) > 0 {
 		result["IP_NUM"] = len(ips)
 		result["IPS"] = ips
 	}
@@ -126,7 +124,7 @@ func queryDimensionResources(ch *clickhouse.CHService, req dimReq) map[string]in
 }
 
 // queryMapTable queries a flow_tag mapping table for ID+NAME pairs.
-func queryMapTable(ch *clickhouse.CHService, ctx context.Context, table, idCol, nameCol string) []resourceEntry {
+func QueryMapTable(ch *clickhouse.CHService, ctx context.Context, table, idCol, nameCol string) []ResourceEntry {
 	q := fmt.Sprintf("SELECT %s, %s FROM flow_tag.%s WHERE %s != 0 ORDER BY %s LIMIT 20", idCol, nameCol, table, idCol, idCol)
 	rows, err := ch.Query(ctx, q)
 	if err != nil {
@@ -139,20 +137,20 @@ func queryMapTable(ch *clickhouse.CHService, ctx context.Context, table, idCol, 
 		return nil
 	}
 
-	result := make([]resourceEntry, 0, len(data))
+	result := make([]ResourceEntry, 0, len(data))
 	for _, row := range data {
 		id := row[idCol]
-		name := getStrDim(row, nameCol)
+		name := GetStrDim(row, nameCol)
 		if name == "" {
 			name = fmt.Sprintf("%v", id)
 		}
-		result = append(result, resourceEntry{ID: id, Name: name})
+		result = append(result, ResourceEntry{ID: id, Name: name})
 	}
 	return result
 }
 
 // queryServiceIPs queries distinct IPs from the data table for the given services.
-func queryServiceIPs(ch *clickhouse.CHService, ctx context.Context, svcKeys []svcKey, db, tbl string) []string {
+func QueryServiceIPs(ch *clickhouse.CHService, ctx context.Context, svcKeys []SvcKey, db, tbl string) []string {
 	if tbl == "" {
 		tbl = "l7_flow_log"
 	}
@@ -188,7 +186,7 @@ func queryServiceIPs(ch *clickhouse.CHService, ctx context.Context, svcKeys []sv
 }
 
 // extractServiceIDs extracts "id:type" pairs from the WHERE clause.
-func extractServiceIDs(queries []struct {
+func ExtractServiceIDs(queries []struct {
 	Where  string `json:"WHERE"`
 	Select string `json:"SELECT"`
 	TOP    int    `json:"TOP"`
@@ -263,7 +261,7 @@ func extractServiceIDs(queries []struct {
 
 // getStrDim safely extracts a string from a map.
 // extractIPFromWhere extracts an IP address from WHERE clause conditions like ip_0='1.2.3.4'.
-func extractIPFromWhere(queries []struct {
+func ExtractIPFromWhere(queries []struct {
 	Where  string `json:"WHERE"`
 	Select string `json:"SELECT"`
 	TOP    int    `json:"TOP"`
@@ -286,7 +284,7 @@ func extractIPFromWhere(queries []struct {
 	return ""
 }
 
-func getStrDim(m map[string]interface{}, key string) string {
+func GetStrDim(m map[string]interface{}, key string) string {
 	if v, ok := m[key]; ok && v != nil {
 		if s, ok2 := v.(string); ok2 {
 			return s
@@ -296,28 +294,27 @@ func getStrDim(m map[string]interface{}, key string) string {
 }
 
 // emptyDimensionResult returns a zero-filled dimension result.
-func emptyDimensionResult() map[string]interface{} {
+func EmptyDimensionResult() map[string]interface{} {
 	return map[string]interface{}{
-		"REGION_NUM": 0, "REGIONS": []resourceEntry{},
-		"AZ_NUM": 0, "AZS": []resourceEntry{},
-		"VPC_NUM": 0, "VPCS": []resourceEntry{},
-		"ROUTER_NUM": 0, "ROUTERS": []resourceEntry{},
-		"DHCPGW_NUM": 0, "DHCPGWS": []resourceEntry{},
-		"SUBNET_NUM": 0, "SUBNETS": []resourceEntry{},
+		"REGION_NUM": 0, "REGIONS": []ResourceEntry{},
+		"AZ_NUM": 0, "AZS": []ResourceEntry{},
+		"VPC_NUM": 0, "VPCS": []ResourceEntry{},
+		"ROUTER_NUM": 0, "ROUTERS": []ResourceEntry{},
+		"DHCPGW_NUM": 0, "DHCPGWS": []ResourceEntry{},
+		"SUBNET_NUM": 0, "SUBNETS": []ResourceEntry{},
 		"IP_NUM": 0, "IPS": []string{},
-		"HOST_NUM": 0, "HOSTS": []resourceEntry{},
-		"CHOST_NUM": 0, "CHOSTS": []resourceEntry{},
-		"LB_NUM": 0, "LBS": []resourceEntry{},
-		"NATGW_NUM": 0, "NATGWS": []resourceEntry{},
-		"REDIS_NUM": 0, "REDISES": []resourceEntry{},
-		"RDS_NUM": 0, "RDSES": []resourceEntry{},
-		"POD_CLUSTER_NUM": 0, "POD_CLUSTERS": []resourceEntry{},
-		"POD_NS_NUM": 0, "POD_NSES": []resourceEntry{},
-		"POD_NODE_NUM": 0, "POD_NODES": []resourceEntry{},
-		"POD_SERVICE_NUM": 0, "POD_SERVICES": []resourceEntry{},
-		"POD_GROUP_NUM": 0, "POD_GROUPS": []resourceEntry{},
-		"POD_NUM": 0, "PODS": []resourceEntry{},
+		"HOST_NUM": 0, "HOSTS": []ResourceEntry{},
+		"CHOST_NUM": 0, "CHOSTS": []ResourceEntry{},
+		"LB_NUM": 0, "LBS": []ResourceEntry{},
+		"NATGW_NUM": 0, "NATGWS": []ResourceEntry{},
+		"REDIS_NUM": 0, "REDISES": []ResourceEntry{},
+		"RDS_NUM": 0, "RDSES": []ResourceEntry{},
+		"POD_CLUSTER_NUM": 0, "POD_CLUSTERS": []ResourceEntry{},
+		"POD_NS_NUM": 0, "POD_NSES": []ResourceEntry{},
+		"POD_NODE_NUM": 0, "POD_NODES": []ResourceEntry{},
+		"POD_SERVICE_NUM": 0, "POD_SERVICES": []ResourceEntry{},
+		"POD_GROUP_NUM": 0, "POD_GROUPS": []ResourceEntry{},
+		"POD_NUM": 0, "PODS": []ResourceEntry{},
 		"debug": map[string]interface{}{},
 	}
 }
-
