@@ -21,7 +21,6 @@ type CHConfig struct {
 type Config struct {
 	Port      string
 	StaticDir string
-	DataDir   string
 	CacheDir  string
 
 	// External services (optional — "" means not configured).
@@ -83,7 +82,6 @@ func Load() *Config {
 	cfg := &Config{
 		Port:           envStr("PORT", "8888"),
 		StaticDir:      envStr("STATIC_DIR", "../cloud.deepflow.yunshan.net"),
-		DataDir:        envStr("DATA_DIR", "./data"),
 		CacheDir:       envStr("CACHE_DIR", "../api_cache"),
 		ZerotraceAddr:  os.Getenv("ZEROTRACE_ADDR"),
 		AlgorithmsAddr: os.Getenv("ALGORITHMS_ADDR"),

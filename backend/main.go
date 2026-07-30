@@ -66,7 +66,6 @@ func main() {
 	addr := ":" + cfg.Port
 	log.Printf("🚀 DeepTrace Backend starting on %s", addr)
 	log.Printf("   Static: %s", cfg.StaticDir)
-	log.Printf("   Data:   %s", cfg.DataDir)
 	if deps.Cache != nil {
 		log.Printf("   Cache:  %d entries", deps.Cache.Len())
 	}
