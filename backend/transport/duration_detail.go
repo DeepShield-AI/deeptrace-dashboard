@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"deeptrace-backend/query/fastlist"
 	"deeptrace-backend/query/showmetrics"
 	"deeptrace-backend/query/showtagvalues"
 	"encoding/json"
@@ -51,7 +52,7 @@ func handleDurationDetail(deps *Dependencies) http.HandlerFunc {
 
 		if req.Where != nil {
 			for _, rs := range req.Where.ResourceSets {
-				conds := flattenFastListConditions(rs.Condition, "flow_log")
+				conds := fastlist.FlattenFastListConditions(rs.Condition, "flow_log")
 				for _, c := range conds {
 					if strings.Contains(c, "response_duration") || strings.Contains(c, "request") {
 						metricConditions = append(metricConditions, c)
