@@ -86,8 +86,7 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 					strings.HasPrefix(lowCol, "k8s.label_") || strings.HasPrefix(lowCol, "k8s.annotation_") ||
 					strings.HasPrefix(lowCol, "k8s.env_") || strings.HasPrefix(lowCol, "cloud.tag_") ||
 					strings.HasPrefix(lowCol, "os.app_") || lowCol == "attribute" ||
-					strings.HasPrefix(lowCol, "process_") || strings.HasPrefix(lowCol, "x_request_") ||
-					strings.HasPrefix(lowCol, "epc_") {
+					strings.HasPrefix(lowCol, "process_") || strings.HasPrefix(lowCol, "x_request_") {
 					cleanKey := strings.Trim(key, "`")
 					cols = append(cols, fmt.Sprintf("'' AS `%s`", cleanKey))
 					continue
@@ -104,6 +103,10 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 						col = "request_resource"
 					case "event_type":
 						col = "l7_protocol"
+					case "epc_0":
+						col = "epc_id_0"
+					case "epc_1":
+						col = "epc_id_1"
 					}
 				}
 
