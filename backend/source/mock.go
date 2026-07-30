@@ -8,7 +8,7 @@ import (
 	"os"
 	"sync"
 
-	"deeptrace-backend/engine"
+	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/query"
 )
 
@@ -88,7 +88,7 @@ func (d *MockDataSource) QueryList(ctx context.Context, req *query.QuerierListRe
 	}
 
 	// Build SCHEMAS from first row.
-	schemas := engine.BuildSchemas(data[0])
+	schemas := clickhouse.BuildSchemas(data[0])
 
 	return &query.Result{
 		Data:   data,
@@ -213,7 +213,7 @@ func (d *MockDataSource) QueryTop(ctx context.Context, req *query.QuerierListReq
 		return &query.Result{Data: []map[string]interface{}{}}, nil
 	}
 
-	schemas := engine.BuildSchemas(result[0])
+	schemas := clickhouse.BuildSchemas(result[0])
 	return &query.Result{
 		Data:   result,
 		Count:  len(result),

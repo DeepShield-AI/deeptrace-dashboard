@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"deeptrace-backend/engine"
+	"deeptrace-backend/clickhouse"
 )
 
 type durationDetailRequest struct {
@@ -148,8 +148,8 @@ func handleDurationDetail(deps *Dependencies) http.HandlerFunc {
 				if _, exists := r[nodeKey]; !exists {
 					if tv, ok := r[typeCol]; ok {
 						if t, ok2 := toInt(tv); ok2 {
-							r[nodeKey] = engine.NodeTypeFor(t)
-							r[iconKey] = engine.IconFor(t)
+							r[nodeKey] = clickhouse.NodeTypeFor(t)
+							r[iconKey] = clickhouse.IconFor(t)
 						}
 					}
 				}

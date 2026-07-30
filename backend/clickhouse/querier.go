@@ -42,6 +42,7 @@ type QueryTraceMapResult struct {
 // QueryList — returns structured List data from ClickHouse
 // ---------------------------------------------------------------------------
 
+
 func (s *CHService) QueryList(ctx context.Context, req *QuerierRequest) (*QueryListResult, error) {
 	sql, err := BuildSelectSQL(*req)
 	if err != nil {

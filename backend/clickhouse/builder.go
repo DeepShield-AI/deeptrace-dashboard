@@ -585,7 +585,7 @@ colMap["role"] = "0"
 		wheres = append(wheres, fmt.Sprintf("time <= '%s'", ts))
 	}
 	if q.Where != "" {
-		cleanWhere := cleanWhereClause(q.Where)
+		cleanWhere := CleanWhereClause(q.Where)
 		// Map API column names to physical CH column names.
 		cleanWhere = strings.ReplaceAll(cleanWhere, "`ip_0`", "`ip4_0`")
 		cleanWhere = strings.ReplaceAll(cleanWhere, "`ip_1`", "`ip4_1`")
@@ -647,7 +647,7 @@ colMap["role"] = "0"
 
 	// HAVING clause — normalize aggregate expressions to CH equivalents.
 	if q.Having != "" {
-		cleanHaving := cleanWhereClause(q.Having)
+		cleanHaving := CleanWhereClause(q.Having)
 		cleanHaving = strings.ReplaceAll(cleanHaving, "`ip_0`", "`ip4_0`")
 		cleanHaving = strings.ReplaceAll(cleanHaving, "`ip_1`", "`ip4_1`")
 		cleanHaving = strings.ReplaceAll(cleanHaving, "ip_0", "ip4_0")
@@ -750,8 +750,8 @@ func BuildShowAttributesSQL(database, table string) string {
 	return fmt.Sprintf("SELECT attribute_names, attribute_values, _id FROM %s LIMIT 100", fullTable)
 }
 
-// cleanWhereClause strips exist() calls from the WHERE clause.
-func cleanWhereClause(where string) string {
+// CleanWhereClause strips exist() calls from the WHERE clause.
+func CleanWhereClause(where string) string {
 	for strings.Contains(where, "exist(") {
 		start := strings.Index(where, "exist(")
 		end := start + 5

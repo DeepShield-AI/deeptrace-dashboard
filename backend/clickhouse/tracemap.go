@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"deeptrace-backend/engine"
 )
 
 type endpointStat struct {
@@ -321,8 +320,8 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 	nodes := make([]map[string]interface{}, 0, len(svcMap))
 
 	for sk, agg := range svcMap {
-		nodeType := engine.NodeTypeFor(int(sk.typ))
-		iconID := engine.IconFor(int(sk.typ))
+		nodeType := NodeTypeFor(int(sk.typ))
+		iconID := IconFor(int(sk.typ))
 		// service_uid: cloud format "auto_service_id=X,auto_service_type=Y[,app_service=,ip=Z]"
 		serviceUID := fmt.Sprintf("auto_service_id=%v,auto_service_type=%v", sk.id, sk.typ)
 		uidSuffix := serviceUID
@@ -662,8 +661,8 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 					"auto_service_type_1":         GetF64(row, "auto_service_type_1"),
 					"auto_service_id_0":           GetF64(row, "auto_service_id_0"),
 					"auto_service_id_1":           GetF64(row, "auto_service_id_1"),
-					"client_icon_id":              engine.IconFor(int(GetF64(row, "auto_service_type_0"))),
-					"server_icon_id":              engine.IconFor(int(GetF64(row, "auto_service_type_1"))),
+					"client_icon_id":              IconFor(int(GetF64(row, "auto_service_type_0"))),
+					"server_icon_id":              IconFor(int(GetF64(row, "auto_service_type_1"))),
 					"observation_point":           obsPt,
 					"ip_0":                        GetStr(row, "ip4_0"),
 					"ip_1":                        GetStr(row, "ip4_1"),
@@ -671,8 +670,8 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 					"app_service_1":               GetStr(row, "auto_service_name_1"),
 					"auto_service_0":              GetStr(row, "auto_service_name_0"),
 					"auto_service_1":              GetStr(row, "auto_service_name_1"),
-					"client_node_type":            engine.NodeTypeFor(int(GetF64(row, "auto_service_type_0"))),
-					"server_node_type":            engine.NodeTypeFor(int(GetF64(row, "auto_service_type_1"))),
+					"client_node_type":            NodeTypeFor(int(GetF64(row, "auto_service_type_0"))),
+					"server_node_type":            NodeTypeFor(int(GetF64(row, "auto_service_type_1"))),
 					"_querier_region":             "本地",
 					"endpoints":                   endpointsList,
 					"endpoint_stats":              endpointStats,
@@ -734,7 +733,7 @@ func getOrCreate(m map[tmKey]*tmAgg, key tmKey, name string) *tmAgg {
 }
 
 // convertHistory transforms history query data for Top result rows.
-func convertHistory(hist []map[string]interface{}, metrics []metricExpr) []map[string]interface{} {
+func convertHistory(hist []map[string]interface{}, metrics []MetricExpr) []map[string]interface{} {
 	var result []map[string]interface{}
 	for _, row := range hist {
 		entry := map[string]interface{}{}
@@ -742,8 +741,8 @@ func convertHistory(hist []map[string]interface{}, metrics []metricExpr) []map[s
 			entry["toi"] = toi
 		}
 		for _, m := range metrics {
-			if v, ok := row[m.key]; ok {
-				entry[m.key] = v
+			if v, ok := row[m.Key]; ok {
+				entry[m.Key] = v
 			}
 		}
 		result = append(result, entry)
@@ -756,7 +755,7 @@ func quoteCH(s string) string {
 }
 
 // fillNullHistory fills gaps in time-series history data with null entries.
-func fillNullHistory(hist []map[string]interface{}, interval, timeStart, timeEnd int64, fill string, metrics []metricExpr) []map[string]interface{} {
+func fillNullHistory(hist []map[string]interface{}, interval, timeStart, timeEnd int64, fill string, metrics []MetricExpr) []map[string]interface{} {
 	if len(hist) == 0 || interval <= 0 || timeStart >= timeEnd {
 		return hist
 	}
@@ -778,13 +777,13 @@ func fillNullHistory(hist []map[string]interface{}, interval, timeStart, timeEnd
 			entry := map[string]interface{}{"toi": float64(t)}
 			for _, m := range metrics {
 				if fill == "0" {
-					entry[m.key] = float64(0)
+					entry[m.Key] = float64(0)
 				} else if fill == "none" {
 					// Skip — don't create entry for missing data
 					continue
 				} else {
 					// "null" or empty — use nil
-					entry[m.key] = nil
+					entry[m.Key] = nil
 				}
 			}
 			result = append(result, entry)

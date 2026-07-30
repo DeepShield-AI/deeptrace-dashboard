@@ -9,9 +9,9 @@ import (
 
 )
 
-type metricExpr struct {
-	key string
-	sql string
+type MetricExpr struct {
+	Key string
+	SQL string
 }
 
 
@@ -45,7 +45,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	items := ParseSelectList(q.Select)
 
 	constKeys := map[string]bool{}
-	var metricExprs []metricExpr
+	var MetricExprs []MetricExpr
 	isFlowLog := db == "flow_log"
 	isFlowMetrics := db == "flow_metrics"
 
@@ -58,7 +58,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			if commaIdx > 0 {
 				field := strings.TrimSpace(inner[:commaIdx])
 				pct := strings.TrimSpace(inner[commaIdx+1:])
-				metricExprs = append(metricExprs, metricExpr{
+				MetricExprs = append(MetricExprs, MetricExpr{
 					item.Key, fmt.Sprintf("quantile(%s)(`%s`)", pct, strings.ReplaceAll(field, "`", "")),
 				})
 			}
@@ -118,11 +118,11 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 					sqlExpr = strings.ReplaceAll(sqlExpr, "rtt", "rtt_sum / greatest(rtt_count, 1)")
 				}
 			}
-			metricExprs = append(metricExprs, metricExpr{item.Key, sqlExpr})
+			MetricExprs = append(MetricExprs, MetricExpr{item.Key, sqlExpr})
 		}
 	}
 
-	if len(metricExprs) == 0 {
+	if len(MetricExprs) == 0 {
 		return nil, fmt.Errorf("no metric expressions found")
 	}
 
@@ -134,7 +134,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		wheres = append(wheres, fmt.Sprintf("time <= %d", req.TimeEnd))
 	}
 	if q.Where != "" {
-		cleanWhere := cleanWhereClause(q.Where)
+		cleanWhere := CleanWhereClause(q.Where)
 		if cleanWhere != "" {
 			wheres = append(wheres, cleanWhere)
 		}
@@ -145,8 +145,8 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	}
 
 	var metricSelects []string
-	for _, m := range metricExprs {
-		metricSelects = append(metricSelects, fmt.Sprintf("%s AS `%s`", m.sql, m.key))
+	for _, m := range MetricExprs {
+		metricSelects = append(metricSelects, fmt.Sprintf("%s AS `%s`", m.SQL, m.Key))
 	}
 
 	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -474,9 +474,9 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 				}
 			}
 		}
-		for _, m := range metricExprs {
-			if v, ok := row[m.key]; ok {
-				resultRow[m.key] = v
+		for _, m := range MetricExprs {
+			if v, ok := row[m.Key]; ok {
+				resultRow[m.Key] = v
 			}
 		}
 
@@ -522,7 +522,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		histRows, hErr := s.Query(qCtx, hSQL)
 		if hErr == nil {
 			if histData, hErr2 := ScanRows(histRows); hErr2 == nil {
-				resultRow["HISTORY"] = fillNullHistory(convertHistory(histData, metricExprs), int64(req.Interval), req.TimeStart, req.TimeEnd, req.Fill, metricExprs)
+				resultRow["HISTORY"] = fillNullHistory(convertHistory(histData, MetricExprs), int64(req.Interval), req.TimeStart, req.TimeEnd, req.Fill, MetricExprs)
 			}
 			histRows.Close()
 		}

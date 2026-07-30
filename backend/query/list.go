@@ -3,7 +3,7 @@ package query
 import (
 	"context"
 
-	"deeptrace-backend/engine"
+	"deeptrace-backend/clickhouse"
 )
 
 // QueryList executes a List query through the DataSourceChain with fallbacks.
@@ -27,7 +27,7 @@ func (s *QuerierService) QueryList(ctx context.Context, req *QuerierListRequest)
 					Data:   rows,
 					Count:  len(rows),
 					Type:   "Application_Detail_List",
-					Fields: engine.BuildSchemas(rows[0]),
+					Fields: clickhouse.BuildSchemas(rows[0]),
 				}, nil
 			}
 		}

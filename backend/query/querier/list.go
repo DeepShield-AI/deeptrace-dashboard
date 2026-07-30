@@ -10,7 +10,6 @@ import (
 
 	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
-	"deeptrace-backend/engine"
 	"deeptrace-backend/query"
 	"deeptrace-backend/query/flowlog"
 )
@@ -301,7 +300,7 @@ func fillTopExtraFields(sel string, data []map[string]interface{}) {
 		case strings.HasPrefix(lower, "node_type("):
 			val = "_"; fill = true
 		case strings.HasPrefix(lower, "icon_id("):
-			val = engine.IconIDDefault(item.Key); fill = true
+			val = clickhouse.IconIDDefault(item.Key); fill = true
 		case strings.HasPrefix(lower, "enum("):
 			val = nil; fill = true
 			if len(data) > 0 { if v, ok := data[0][strings.TrimSpace(item.Expr[len("Enum("):len(item.Expr)-1])]; ok { val = v } }
@@ -339,7 +338,7 @@ func fillListExtraFields(sel string, data []map[string]interface{}) {
 		case strings.HasPrefix(lower, "node_type("):
 			val = "_"; fill = true
 		case strings.HasPrefix(lower, "icon_id("):
-			val = engine.IconIDDefault(item.Key); fill = true
+			val = clickhouse.IconIDDefault(item.Key); fill = true
 		case strings.HasPrefix(lower, "enum("):
 			val = nil; fill = true
 			if len(data) > 0 { if v, ok := data[0][strings.TrimSpace(item.Expr[len("Enum("):len(item.Expr)-1])]; ok { val = v } }

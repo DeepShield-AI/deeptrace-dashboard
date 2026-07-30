@@ -9,7 +9,6 @@ import (
 
 	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/enum"
-	"deeptrace-backend/engine"
 	"deeptrace-backend/query"
 )
 
@@ -196,14 +195,14 @@ func enrichListResults(data []map[string]interface{}, enumSvc *enum.EnumService)
 					nodeKey := side + "node_type"
 					if nv, exists := row[nodeKey]; exists {
 						if ns, ok3 := nv.(string); ok3 && (strings.HasPrefix(ns, "auto_service_") || ns == "_") {
-							row[nodeKey] = engine.NodeTypeFor(t)
+							row[nodeKey] = clickhouse.NodeTypeFor(t)
 						}
 					}
 					// Fill icon_id if still default -13/0.
 					iconKey := side + "icon_id"
 					if iv, exists := row[iconKey]; exists {
 						if f, ok3 := toFloat(iv); ok3 && (f == -13 || f == 0) {
-							row[iconKey] = engine.IconFor(t)
+							row[iconKey] = clickhouse.IconFor(t)
 						}
 					}
 				}
