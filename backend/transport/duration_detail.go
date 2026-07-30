@@ -129,7 +129,7 @@ func handleDurationDetail(deps *Dependencies) http.HandlerFunc {
 		if req.Offset > 0 { sql += fmt.Sprintf(" OFFSET %d", req.Offset) }
 		log.Printf("📊 duration_detail SQL: %s", sql)
 
-		rows, err := clickhouse.HTTPQuery(sql)
+		rows, err := chHTTPQuery(sql)
 		if err != nil {
 			log.Printf("⚠️ duration_detail CH error: %v", err)
 			writeSuccess(w, map[string]interface{}{"result": []interface{}{}})
