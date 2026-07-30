@@ -114,8 +114,3 @@ func BuildSchemas(row map[string]interface{}) map[string]interface{} {
 	return schemas
 }
 
-// MetricExpr holds a parsed metric expression for Top/TraceMap queries.
-type MetricExpr struct {
-	Key string
-	SQL string
-}

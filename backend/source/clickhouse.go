@@ -10,6 +10,8 @@ import (
 	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/enum"
 	"deeptrace-backend/query"
+	"deeptrace-backend/query/flowlog"
+	"deeptrace-backend/query/list"
 	"deeptrace-backend/query/top"
 	"deeptrace-backend/query/tracemap"
 )
@@ -71,7 +73,7 @@ func (d *CHDataSource) QueryList(ctx context.Context, req *query.QuerierListRequ
 		return nil, nil
 	}
 	chReq := toCHRequest(req)
-	result, err := d.ch.QueryList(ctx, chReq)
+	result, err := list.QueryList(d.ch, ctx, chReq)
 	if err != nil {
 		log.Printf("CH QueryList error: %v", err)
 		return nil, err
@@ -115,7 +117,7 @@ func (d *CHDataSource) QueryFlowLogDetail(ctx context.Context, req *query.Querie
 		return nil, nil
 	}
 	bodyBytes, _ := json.Marshal(req)
-	result, err := d.ch.QueryFlowLogDetail(ctx, string(bodyBytes))
+	result, err := flowlog.QueryFlowLogDetailCH(d.ch, ctx, string(bodyBytes))
 	if err != nil {
 		return nil, err
 	}
