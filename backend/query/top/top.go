@@ -1,8 +1,8 @@
 package top
 
 import (
-	"deeptrace-backend/query"
 	"context"
+	"deeptrace-backend/query"
 
 	"deeptrace-backend/query/tracemap"
 	"fmt"
@@ -12,7 +12,6 @@ import (
 
 	"deeptrace-backend/clickhouse"
 )
-
 
 func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.QuerierRequest) (*query.QueryTopResult, error) {
 	db := req.Database
@@ -58,7 +57,7 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 				field := strings.TrimSpace(inner[:commaIdx])
 				pct := strings.TrimSpace(inner[commaIdx+1:])
 				metricExprs = append(metricExprs, clickhouse.MetricExpr{
-					item.Key, fmt.Sprintf("quantile(%s)(`%s`)", pct, strings.ReplaceAll(field, "`", "")),
+					Key: item.Key, SQL: fmt.Sprintf("quantile(%s)(`%s`)", pct, strings.ReplaceAll(field, "`", "")),
 				})
 			}
 			continue
@@ -117,7 +116,7 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 					sqlExpr = strings.ReplaceAll(sqlExpr, "rtt", "rtt_sum / greatest(rtt_count, 1)")
 				}
 			}
-			metricExprs = append(metricExprs, clickhouse.MetricExpr{item.Key, sqlExpr})
+			metricExprs = append(metricExprs, clickhouse.MetricExpr{Key: item.Key, SQL: sqlExpr})
 		}
 	}
 
@@ -237,15 +236,15 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 			// Computed virtual columns.
 			"is_internet_0": "any(if(is_ipv4=1 AND (startsWith(IPv4NumToString(ip4_0),'10.') OR startsWith(IPv4NumToString(ip4_0),'172.1') OR startsWith(IPv4NumToString(ip4_0),'172.2') OR startsWith(IPv4NumToString(ip4_0),'172.3') OR startsWith(IPv4NumToString(ip4_0),'192.168.') OR startsWith(IPv4NumToString(ip4_0),'127.') OR startsWith(IPv4NumToString(ip4_0),'100.6') OR startsWith(IPv4NumToString(ip4_0),'100.7') OR startsWith(IPv4NumToString(ip4_0),'100.8') OR startsWith(IPv4NumToString(ip4_0),'100.9') OR startsWith(IPv4NumToString(ip4_0),'100.10') OR startsWith(IPv4NumToString(ip4_0),'100.11') OR startsWith(IPv4NumToString(ip4_0),'100.12')),0,1))",
 			"is_internet_1": "any(if(is_ipv4=1 AND (startsWith(IPv4NumToString(ip4_1),'10.') OR startsWith(IPv4NumToString(ip4_1),'172.1') OR startsWith(IPv4NumToString(ip4_1),'172.2') OR startsWith(IPv4NumToString(ip4_1),'172.3') OR startsWith(IPv4NumToString(ip4_1),'192.168.') OR startsWith(IPv4NumToString(ip4_1),'127.') OR startsWith(IPv4NumToString(ip4_1),'100.6') OR startsWith(IPv4NumToString(ip4_1),'100.7') OR startsWith(IPv4NumToString(ip4_1),'100.8') OR startsWith(IPv4NumToString(ip4_1),'100.9') OR startsWith(IPv4NumToString(ip4_1),'100.10') OR startsWith(IPv4NumToString(ip4_1),'100.11') OR startsWith(IPv4NumToString(ip4_1),'100.12')),0,1))",
-			"role": "0",
-			"process_0": "process_id_0", "process_1": "process_id_1",
+			"role":          "0",
+			"process_0":     "process_id_0", "process_1": "process_id_1",
 			"x_request_0": "x_request_id_0", "x_request_1": "x_request_id_1",
 			"k8s.label_0": "any(dictGetOrDefault('flow_tag.pod_k8s_labels_map', 'labels', toUInt64(pod_id_0), ''))",
 			"k8s.label_1": "any(dictGetOrDefault('flow_tag.pod_k8s_labels_map', 'labels', toUInt64(pod_id_1), ''))",
 			"cloud.tag_0": "any(dictGetOrDefault('flow_tag.chost_cloud_tags_map', 'cloud_tags', toUInt64(l3_device_id_0), ''))",
 			"cloud.tag_1": "any(dictGetOrDefault('flow_tag.chost_cloud_tags_map', 'cloud_tags', toUInt64(l3_device_id_1), ''))",
-			"os.app_0": "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_0), ''))",
-			"os.app_1": "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_1), ''))",
+			"os.app_0":    "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_0), ''))",
+			"os.app_1":    "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_1), ''))",
 		}
 	}
 
