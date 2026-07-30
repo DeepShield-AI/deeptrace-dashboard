@@ -53,7 +53,12 @@ func RegisterMisc(mux *http.ServeMux, deps *Dependencies) {
 				"UPDATED_AT":      "2025-01-01 00:00:00",
 				"TEAM_INFO":       map[string]interface{}{"current_role": 4, "name": "Default", "team_id": 1},
 				"TEAM_ID":         1,
-				"OWNER_USER_INFO": map[string]interface{}{"ID": 1, "USERNAME": "admin"},
+				"OWNER_USER_INFO": map[string]interface{}{
+					"ID": 1, "USERNAME": "admin", "COMPANY": "admin",
+					"PHONE_NUM": "", "EMAIL": "admin@deepflow.local",
+					"STATE": 1, "USER_TYPE": 1, "AUTH_TYPE": 1,
+					"USERUUID": "1", "DEPARTMENT": "", "SUB_DEPARTMENT": "",
+				},
 				"ACCESS_ACTIONS":  []string{"read"},
 			},
 		})
