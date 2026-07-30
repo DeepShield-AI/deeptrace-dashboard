@@ -333,8 +333,8 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			"auto_instance": "if(empty(app_instance), toString(auto_instance_id_0), app_instance)",
 			"event_desc":    "request_resource",
 			// auto_service_0/1: resolve name via dictGet(device_map) matching cloud behavior.
-			"auto_service_0": "if(auto_service_type_0 IN (0, 255), if(any(is_ipv4) = 1, IPv4NumToString(any(ip4_0)), IPv6NumToString(any(ip6_0))), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_0), toUInt64(auto_service_id_0)), ''))",
-			"auto_service_1": "if(auto_service_type_1 IN (0, 255), if(any(is_ipv4) = 1, IPv4NumToString(any(ip4_1)), IPv6NumToString(any(ip6_1))), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_1), toUInt64(auto_service_id_1)), ''))",
+			"auto_service_0": "if(auto_service_type_0 IN (0, 255), if(any(is_ipv4) = 1, IPv4NumToString(any(ip4_0)), IPv6NumToString(any(ip6_0))), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_0), toUInt64(any(auto_service_id_0))), ''))",
+			"auto_service_1": "if(auto_service_type_1 IN (0, 255), if(any(is_ipv4) = 1, IPv4NumToString(any(ip4_1)), IPv6NumToString(any(ip6_1))), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_1), toUInt64(any(auto_service_id_1))), ''))",
 			// Virtual ZT columns: map to real ClickHouse columns for flow_log.
 			"client_node_type": "auto_service_type_0",
 			"server_node_type": "auto_service_type_1",
@@ -346,6 +346,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	if isFlowLog {
 		flowLogSkipCols = map[string]bool{
 			"is_internet_0": true, "is_internet_1": true,
+			"_0": true, "_1": true,
 		}
 	}
 
@@ -892,8 +893,8 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 		SELECT
 			auto_service_id_0, auto_service_type_0,
 			auto_service_id_1, auto_service_type_1,
-			dictGet('flow_tag.biz_service_map', 'name', toUInt64(auto_service_id_0)) AS auto_service_name_0,
-			dictGet('flow_tag.biz_service_map', 'name', toUInt64(auto_service_id_1)) AS auto_service_name_1,
+			dictGet('flow_tag.biz_service_map', 'name', toUInt64(any(auto_service_id_0))) AS auto_service_name_0,
+			dictGet('flow_tag.biz_service_map', 'name', toUInt64(any(auto_service_id_1))) AS auto_service_name_1,
 			any(signal_source) AS signal_source,
 			any(observation_point) AS observation_point,
 			any(ip4_0) AS ip4_0,
