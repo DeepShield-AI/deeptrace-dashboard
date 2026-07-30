@@ -202,21 +202,26 @@ func QueryList(zt *client.ZerotraceService, enumSvc *enum.EnumService, bodyStr s
 			if !strings.HasPrefix(preAs, "enum(") {
 				continue
 			}
-			val, ok := row[col].(string)
-			if !ok || val == "" {
-				continue
-			}
-			// Use EnumService for Chinese display names (loaded from CH dictionaries).
-			// The lookup key is the raw value (e.g., "modify"), not the English display name.
-			// The raw column has the same name as the enum argument.
 			enumName := strings.TrimPrefix(preAs, "enum(")
 			enumName = strings.TrimSuffix(enumName, ")")
+			// Map API tag name to int_enum_map tag name (ZT uses l7_ prefix for flow_log).
+			switch enumName {
+			case "signal_source": enumName = "l7_signal_source"
+			case "protocol": enumName = "l7_protocol"
+			}
+			// ZT may return English display name (string) or raw value (int/float).
+			// Try raw column value first for EnumService lookup, fall back to ZT's value.
+			val := row[col]
 			if enumSvc != nil {
 				if rawVal, ok2 := row[enumName]; ok2 && rawVal != nil {
-					data[ir][col] = enumSvc.GetDisplay(enumName, rawVal)
+					display := enumSvc.GetDisplay(enumName, rawVal)
+					log.Printf("enum %s: raw=%v display=%v", enumName, rawVal, display)
+					data[ir][col] = display
 				}
-			} else if zh := EnumZHCN(val); zh != "" {
-				data[ir][col] = zh
+			} else if s, ok := val.(string); ok && s != "" {
+				if zh := EnumZHCN(s); zh != "" {
+					data[ir][col] = zh
+				}
 			}
 		}
 	}
