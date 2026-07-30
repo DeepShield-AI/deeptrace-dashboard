@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"deeptrace-backend/query/showmetrics"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -433,7 +434,7 @@ func chQueryFastList(deps *Dependencies, db, tbl, selStr string, extras []string
 	if offset > 0 { sql += fmt.Sprintf(" OFFSET %d", offset) }
 	log.Printf("🔍 CH fast_list fallback: db=%s sql=%s", db, sql)
 
-	rows, err := chHTTPQuery(sql)
+	rows, err := showmetrics.HTTPQuery(sql)
 	if err != nil {
 		log.Printf("⚠️  CH fast_list error: %v", err)
 		return nil
@@ -449,7 +450,7 @@ func chQueryFastList(deps *Dependencies, db, tbl, selStr string, extras []string
 	// Load int_enum_map for translation.
 	enumCache := map[string]map[string]string{}
 	for _, col := range enumCols {
-		eRes, eErr := chHTTPQuery(fmt.Sprintf("SELECT toString(value), name_zh FROM flow_tag.int_enum_map WHERE tag_name='%s'", col))
+		eRes, eErr := showmetrics.HTTPQuery(fmt.Sprintf("SELECT toString(value), name_zh FROM flow_tag.int_enum_map WHERE tag_name='%s'", col))
 		m := map[string]string{}
 		if eErr == nil {
 			for _, er := range eRes {

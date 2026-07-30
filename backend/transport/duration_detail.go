@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"deeptrace-backend/query/showmetrics"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -129,7 +130,7 @@ func handleDurationDetail(deps *Dependencies) http.HandlerFunc {
 		if req.Offset > 0 { sql += fmt.Sprintf(" OFFSET %d", req.Offset) }
 		log.Printf("📊 duration_detail SQL: %s", sql)
 
-		rows, err := chHTTPQuery(sql)
+		rows, err := showmetrics.HTTPQuery(sql)
 		if err != nil {
 			log.Printf("⚠️ duration_detail CH error: %v", err)
 			writeSuccess(w, map[string]interface{}{"result": []interface{}{}})

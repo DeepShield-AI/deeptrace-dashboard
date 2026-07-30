@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"deeptrace-backend/query/showmetrics"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -134,7 +135,7 @@ type enumEntry struct {
 // If the comment contains key:value pairs, parses them as enum entries.
 func queryEnumFromComment(db, tbl, tag, likeFilter string, limit int) []interface{} {
 	query := fmt.Sprintf("SELECT comment, type FROM system.columns WHERE database='%s' AND table='%s' AND name='%s'", db, tbl, tag)
-	rows, err := chHTTPQuery(query)
+	rows, err := showmetrics.HTTPQuery(query)
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
@@ -391,7 +392,7 @@ func enrichEnumEntries(data []interface{}, tag string) {
 		enumTag = "l7_protocol"
 	}
 	q := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.int_enum_map WHERE tag_name='%s'", enumTag)
-	rows, err := chHTTPQuery(q)
+	rows, err := showmetrics.HTTPQuery(q)
 
 	// Build lookup map: value string -> {name_zh, description_zh}.
 	type enumInfo struct{ name, desc string }
@@ -447,11 +448,11 @@ func queryEnumFromFlowTag(tag, like string, limit int) []interface{} {
 	}
 	// Try int_enum_map first.
 	q := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.int_enum_map WHERE tag_name='%s' ORDER BY toUInt64(value)", enumTag)
-	rows, err := chHTTPQuery(q)
+	rows, err := showmetrics.HTTPQuery(q)
 	// If int_enum_map has no data, try string_enum_map (for tags like event_type).
 	if err != nil || len(rows) == 0 {
 		q2 := fmt.Sprintf("SELECT value, name_zh, description_zh FROM flow_tag.string_enum_map WHERE tag_name='%s' ORDER BY value", enumTag)
-		rows, err = chHTTPQuery(q2)
+		rows, err = showmetrics.HTTPQuery(q2)
 	}
 	if err != nil || len(rows) == 0 {
 		return nil
@@ -624,7 +625,7 @@ func queryFlowTagTable(table, idCol, nameCol string, limit int) []interface{} {
 	if limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", limit)
 	}
-	rows, err := chHTTPQuery(q)
+	rows, err := showmetrics.HTTPQuery(q)
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
@@ -760,7 +761,7 @@ func queryDistinctValues(req svRequest, colName, like string, limit int) []inter
 		q += fmt.Sprintf(" LIMIT %d", limit)
 	}
 
-	rows, err := chHTTPQuery(q)
+	rows, err := showmetrics.HTTPQuery(q)
 	if err != nil || len(rows) == 0 {
 		return nil
 	}
