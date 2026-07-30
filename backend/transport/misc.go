@@ -975,7 +975,7 @@ func handleDurationDetail(deps *Dependencies) http.HandlerFunc {
 					} else {
 						// Strip ZT-only virtual columns not present in CH (e.g., role).
 						skip := false
-						for _, vcol := range []string{"role", "is_internet"} {
+						for _, vcol := range []string{"role", "is_internet", "ip"} {
 							if strings.Contains(c, "`"+vcol+"`") { skip = true; break }
 						}
 						if !skip {
