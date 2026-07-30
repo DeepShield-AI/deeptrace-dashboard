@@ -108,3 +108,11 @@ var idColumnMap = map[string]string{
 	"lb":                "lb_id",
 	"service":           "biz_service_id",
 }
+
+// FastListSkipCols lists virtual columns to skip in WHERE conditions.
+var FastListSkipCols = map[string]struct{}{
+	"role":          {},
+	"is_internet":   {},
+	"is_internet_0": {},
+	"is_internet_1": {},
+}
