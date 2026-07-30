@@ -162,6 +162,15 @@ type fastListRequest struct {
 // virtualColumnMap maps virtual tag names to their physical ID column counterparts.
 // When conditions compare virtual columns to numbers, ZT fails with type mismatches
 // (String vs UInt16). Route to the physical ID column for numeric comparisons.
+// fastListSkipCols lists columns that don't exist in raw ClickHouse tables
+// and should be skipped in WHERE conditions.
+var fastListSkipCols = map[string]struct{}{
+	"role":          {},
+	"is_internet":   {},
+	"is_internet_0": {},
+	"is_internet_1": {},
+}
+
 var virtualColumnMap = map[string]string{
 	"auto_service":      "auto_service_id",
 	"auto_instance":     "auto_instance_id",
@@ -196,6 +205,10 @@ func flattenFastListConditions(conds []interface{}, db string) []string {
 			col := fmt.Sprintf("%v", key)
 			val := m["val"]
 
+		// Skip columns that dont exist in raw ClickHouse.
+		if _, skip := fastListSkipCols[col]; skip {
+			continue
+		}
 			// Virtual tag (String) compared to number: use the physical ID column.
 			if physicalCol, mapped := virtualColumnMap[col]; mapped {
 				if _, isNum := val.(float64); isNum {
@@ -438,6 +451,17 @@ func chQueryFastList(deps *Dependencies, db, tbl, selStr string, extras []string
 	}
 	// Build a ClickHouse-compatible SQL.
 	chSel := normalizeFastListSelect(selStr)
+	// Deduplicate after stripping DSL functions (Enum(x) and x both become x).
+	seenSel := map[string]bool{}
+	var dedupParts []string
+	for _, p := range strings.Split(chSel, ",") {
+		p = strings.TrimSpace(p)
+		if !seenSel[p] {
+			seenSel[p] = true
+			dedupParts = append(dedupParts, p)
+		}
+	}
+	chSel = strings.Join(dedupParts, ", ")
 	// Map virtual tag names to real ClickHouse columns (matching ZT behavior).
 	chSelParts := strings.Split(chSel, ",")
 	for i, p := range chSelParts {
