@@ -34,9 +34,3 @@ func RegisterQuerier(mux *http.ServeMux, srv *query.QuerierService) {
 	mux.HandleFunc("/api/statistics/v1/stats/querier/L", handleList(srv))
 	mux.HandleFunc("/api/statistics/v1/stats/querier/Npb", handleList(srv))
 }
-
-// --------------------------------------------------------------------------
-// List
-// --------------------------------------------------------------------------
-
-

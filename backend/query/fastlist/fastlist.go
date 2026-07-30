@@ -1,6 +1,9 @@
 package fastlist
 
 import (
+	"deeptrace-backend/query"
+	"deeptrace-backend/query/flowlog"
+	"encoding/json"
 	"fmt"
 	"log"
 	"regexp"
@@ -14,6 +17,12 @@ import (
 	"deeptrace-backend/query/showtagvalues"
 )
 
+
+type Deps struct {
+	CH       *clickhouse.CHService
+	Cache    interface{}
+	Zerotrace *client.ZerotraceService
+}
 type FastListRequest struct {
 	DB         string `json:"db"`
 	Table      string `json:"table"`
@@ -287,4 +296,445 @@ func ChQueryFastList(ch *clickhouse.CHService, db, tbl, selStr string, extras []
 //	[0] QuerierJs发送请求 — frontend request as seen by the querier middleware
 //	[1] QuerierJs收到响应 — querier middleware's SQL generation output
 //	[2] Statistics发送请求 — request sent to the Statistics service
+func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr string, body []byte, debug bool) ([]interface{}, *FastListDebugInfo) {
+	var req FastListRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, nil
+	}
+	db := req.DB
+	if db == "" {
+		db = "flow_log"
+	}
+	tbl := req.Table
+	if tbl == "" {
+		tbl = "l7_flow_log"
+	}
+	selStart := strings.Index(selStr, "fast_list/")
+	if selStart < 0 {
+		return nil, nil
+	}
+	selStr = selStr[selStart+len("fast_list/"):]
+	if idx := strings.IndexByte(selStr, '?'); idx >= 0 {
+		selStr = selStr[:idx]
+	}
+	if selStr == "" {
+		return nil, nil
+	}
+
+	var extras []string
+	if req.Where != nil {
+		for _, rs := range req.Where.ResourceSets {
+			extras = append(extras, FlattenFastListConditions(rs.Condition, db)...)
+		}
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 999
+	}
+
+	// Resolve table name: for flow_metrics, append data_source suffix.
+	resolvedTbl := tbl
+	if db == "flow_metrics" && !strings.Contains(tbl, ".") {
+		ds := req.DataSource
+		if ds == "" {
+			ds = "1m"
+		}
+		resolvedTbl = tbl + "." + ds
+	}
+
+	// Build debug info even when ZT is unavailable, so debug mode always produces output.
+	di := &FastListDebugInfo{
+		requestBody: body,
+		db:          db,
+		table:       resolvedTbl,
+		selStr:      selStr,
+		extras:      extras,
+		limit:       limit,
+		offset:      req.Offset,
+	}
+	di.sel = fmt.Sprintf("%s, Count(row) AS count_row", selStr)
+	di.sql = query.BuildBaseSQL(di.sel, resolvedTbl, extras, req.TimeStart, req.TimeEnd,
+		selStr, "count_row", "DESC", limit, req.Offset)
+
+	// zt already passed as parameter
+	if zt == nil || !zt.Available() {
+		if debug {
+			di.err = fmt.Errorf("zerotrace-server not configured or unavailable")
+			return nil, di
+		}
+		return nil, nil
+	}
+
+	log.Printf("🔍 ZT fast_list: db=%s sql=%s", db, di.sql)
+	di.queryStart = time.Now()
+	rows, err := zt.QueryRaw(db, di.sql)
+	di.queryEnd = time.Now()
+	di.result = rows
+	di.err = err
+
+	if err != nil {
+		log.Printf("⚠️  fast_list ZT error: %v", err)
+		// Fallback: query ClickHouse directly when ZT aggregation fails.
+		if chData := ChQueryFastList(ch, db, resolvedTbl, selStr, extras, req.TimeStart, req.TimeEnd, limit, req.Offset); chData != nil {
+			if !debug {
+				return chData, nil
+			}
+			data := chData
+			di.err = nil
+			di.result = &client.QueryResult{
+				Columns: []string{selStr, "count_row"},
+				Values:  make([][]interface{}, len(data)),
+			}
+			for i, row := range data {
+				m, _ := row.(map[string]interface{})
+				var vals []interface{}
+				for _, col := range strings.Split(selStr, ",") {
+					vals = append(vals, m[strings.TrimSpace(col)])
+				}
+				vals = append(vals, m["count_row"])
+				di.result.Values[i] = vals
+			}
+			return data, di
+		}
+		if debug {
+			return nil, di
+		}
+		return nil, nil
+	}
+
+	data := make([]interface{}, 0, len(rows.Values))
+	for _, row := range rows.Values {
+		r := make(map[string]interface{})
+		for i, col := range rows.Columns {
+			if i >= len(row) {
+				continue
+			}
+			val := row[i]
+			if strings.HasPrefix(col, "Enum(") {
+				if s, ok := val.(string); ok {
+					if cn := flowlog.EnumZHCN(s); cn != "" {
+						val = cn
+					}
+				}
+			}
+			r[col] = val
+		}
+		r["_querier_region"] = "本地"
+		data = append(data, r)
+	}
+
+	if debug {
+		return data, di
+	}
+	return data, nil
+}
+
+
+// chQueryFastList queries ClickHouse directly for fast_list when ZT doesn't support the query.
+// normalizeFastListSelect strips DeepFlow DSL functions for CH compatibility.
+// E.g., Enum(observation_point) → observation_point, node_type(x) → x.
+
+func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
+	nowMs := di.queryStart.UnixMilli()
+
+	// Parse the raw request for reuse.
+	var req FastListRequest
+	json.Unmarshal(body, &req) // safe: already parsed in queryFastList
+
+	// Split selectors into a slice for groupBy.
+	selParts := strings.Split(di.selStr, ",")
+
+	// Build the QuerierJs-style nested conditions.
+	resourceSets := make([]interface{}, 0)
+	if req.Where != nil {
+		for _, rs := range req.Where.ResourceSets {
+			conditions := rs.Condition
+			rsEntry := map[string]interface{}{
+				"id": rs.ID,
+				"condition": conditions,
+				"groupBy": selParts,
+			}
+			resourceSets = append(resourceSets, rsEntry)
+		}
+	}
+
+	// Build paths with same structure as request.
+	paths := make([]interface{}, 0)
+	if req.Where != nil && req.Where.Paths != nil {
+		for _, p := range req.Where.Paths {
+			paths = append(paths, p)
+		}
+	}
+	if len(paths) == 0 {
+		paths = append(paths, map[string]string{"endPoint": "R1"})
+	}
+
+	// ---- Entry 0: QuerierJs发送请求 ----
+	entry0 := map[string]interface{}{
+		"name":   "QuerierJs发送请求",
+		"url":    "/querier-params/",
+		"method": "post",
+		"headers": map[string]string{
+			"X-Trace-Id":   fmt.Sprintf("trace-%x", time.Now().UnixNano()),
+			"x-user-id":    "1",
+			"x-user-type":  "1",
+			"x-org-id":     "1",
+			"Accept":       "application/json, text/plain, */*",
+			"Content-Type": "application/json",
+		},
+		"time": nowMs,
+		"body": map[string]interface{}{
+			"conditions": map[string]interface{}{
+				"RESOURCE_SETS": resourceSets,
+			},
+			"selects": map[string]interface{}{
+				"TAGS":    []interface{}{},
+				"METRICS": []interface{}{map[string]interface{}{"func": "count", "key": "row", "params": []interface{}{}}},
+			},
+			"groupBy":  []interface{}{},
+			"tableName": di.table,
+			"paths":    paths,
+			"db":       di.db,
+		},
+	}
+
+	// Build the SQL resource structure for entries 1 and 2.
+	// The WHERE clause strips backtick quotes that may have been added by BuildBaseSQL.
+	whereClause := strings.Join(di.extras, " AND ")
+
+	// Build TAGS from the select string (everything except Count(row)).
+	tagNames := make([]string, 0)
+	metricNames := make([]string, 0)
+	for _, part := range selParts {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, "Enum(") || strings.Contains(part, "signal_source") || !strings.Contains(part, "(") {
+			tagNames = append(tagNames, part)
+		}
+	}
+	metricNames = append(metricNames, "Count(`row`) AS `Count(行数)`")
+
+	// Determine GROUP_BY: use the raw column names (strip Enum() wrappers),
+	// deduplicated (Enum(x),x → x).
+	seen := make(map[string]bool)
+	groupByParts := make([]string, 0)
+	for _, p := range selParts {
+		p = strings.TrimSpace(p)
+		if strings.HasPrefix(p, "Enum(") && strings.HasSuffix(p, ")") {
+			p = p[5 : len(p)-1]
+		}
+		if !seen[p] {
+			seen[p] = true
+			groupByParts = append(groupByParts, p)
+		}
+	}
+	groupBy := strings.Join(groupByParts, ", ")
+
+	// Build SELECT with newTag for the QuerierJs intermediate format.
+	querierSelect := fmt.Sprintf("newTag('R1') as query_id, Count(`row`) AS `Count(行数)`, %s", di.selStr)
+
+	sqlResource := map[string]interface{}{
+		"QUERY_ID": "R1",
+		"ROLES":    []string{"R"},
+		"WHERE":    whereClause,
+		"SELECT":   querierSelect,
+		"TAGS":     tagNames,
+		"METRICS":  metricNames,
+		"GROUP_BY": groupBy,
+	}
+
+	sqlPath := map[string]interface{}{
+		"QUERY_ID": "R1-R1",
+		"ROLES":    []string{"R", "R"},
+		"WHERE":    whereClause,
+		"SELECT":   fmt.Sprintf("newTag('R1-R1') as query_id, Count(`row`) AS `Count(行数)`, %s", di.selStr),
+		"TAGS":     tagNames,
+		"CTAGS":    tagNames,
+		"STAGS":    tagNames,
+		"METRICS":  metricNames,
+		"GROUP_BY": groupBy,
+	}
+
+	// Build return tag info from columns.
+	returnTags := make([]interface{}, 0)
+	for _, t := range tagNames {
+		returnTags = append(returnTags, QuerierColumn{
+			Name:        t,
+			DisplayName: t,
+			IsResource:  false,
+		})
+	}
+	returnMetrics := make([]interface{}, 0)
+	returnMetrics = append(returnMetrics, QuerierColumn{
+		Name:        "Count(行数)",
+		DisplayName: "Count(行数)",
+		Type:        8,
+		Unit:        "个",
+	})
+
+	uuid := fmt.Sprintf("query-%x", time.Now().UnixNano())
+
+	// ---- Entry 1: QuerierJs收到响应 ----
+	entry1 := map[string]interface{}{
+		"name":   "QuerierJs收到响应",
+		"url":    "/querier-params/",
+		"status": 200,
+		"time":   nowMs + 5,
+		"data": map[string]interface{}{
+			"OPT_STATUS": "SUCCESS",
+			"DATA": map[string]interface{}{
+				"resource": []interface{}{map[string]interface{}{
+					"sql":          sqlResource,
+					"returnTags":    returnTags,
+					"returnMetrics": returnMetrics,
+				}},
+				"path": []interface{}{map[string]interface{}{
+					"sql":          sqlPath,
+					"returnTags":    returnTags,
+					"returnMetrics": returnMetrics,
+				}},
+				"uuid": uuid,
+			},
+		},
+	}
+
+	// ---- Entry 2: Statistics发送请求 ----
+	entry2 := map[string]interface{}{
+		"name":   "Statistics发送请求",
+		"url":    "/v1/stats/querier/FastList",
+		"method": "post",
+		"headers": map[string]string{
+			"X-Trace-Id":   fmt.Sprintf("trace-%x", time.Now().UnixNano()),
+			"x-user-id":    "1",
+			"x-user-type":  "1",
+			"x-org-id":     "1",
+			"Accept":       "application/json, text/plain, */*",
+			"Content-Type": "application/json",
+		},
+		"time": nowMs + 10,
+		"body": map[string]interface{}{
+			"DATABASE": di.db,
+			"TABLE":    di.table,
+			"QUERIES":  []interface{}{sqlPath},
+			"SORT": map[string]interface{}{
+				"ORDER_BY":  "Count(行数)",
+				"SORTED_BY": "DESC",
+			},
+			"PAGE_INDEX":  1,
+			"PAGE_SIZE":   di.limit,
+			"time_start":  req.TimeStart,
+			"time_end":    req.TimeEnd,
+			"DEBUG":       1,
+			"DATA_SOURCE": nil,
+		},
+	}
+
+	// ---- Entry 3: Statistics收到响应 ----
+	queryTime := di.queryEnd.Sub(di.queryStart).Seconds()
+
+	// Build SCHEMAS from ZT result columns.
+	schemas := make(map[string]interface{})
+	if di.result != nil {
+		for i, col := range di.result.Columns {
+			s := map[string]interface{}{
+				"label_type": "",
+				"pre_as":     col,
+				"type":       1,
+				"unit":       "",
+			}
+			if i < len(di.result.Schemas) {
+				s["value_type"] = di.result.Schemas[i].ValueType
+				if di.result.Schemas[i].Type != 0 {
+					s["type"] = di.result.Schemas[i].Type
+				}
+				if di.result.Schemas[i].Unit != "" {
+					s["unit"] = di.result.Schemas[i].Unit
+				}
+			} else {
+				s["value_type"] = "String"
+			}
+			schemas[col] = s
+		}
+	}
+
+	entry3Data := map[string]interface{}{
+		"OPT_STATUS":  "SUCCESS",
+		"DESCRIPTION": "",
+	}
+
+	if di.err != nil {
+		entry3Data["OPT_STATUS"] = "ERROR"
+		entry3Data["DESCRIPTION"] = di.err.Error()
+	} else {
+		// Build DATA rows same as queryFastList.
+		dataRows := make([]interface{}, 0)
+		if di.result != nil {
+			for _, row := range di.result.Values {
+				r := make(map[string]interface{})
+				for i, col := range di.result.Columns {
+					if i >= len(row) {
+						continue
+					}
+					val := row[i]
+					if strings.HasPrefix(col, "Enum(") {
+						if s, ok := val.(string); ok {
+							if cn := flowlog.EnumZHCN(s); cn != "" {
+								val = cn
+							}
+						}
+					}
+					r[col] = val
+				}
+				r["_querier_region"] = "本地"
+				dataRows = append(dataRows, r)
+			}
+		}
+		entry3Data["DATA"] = dataRows
+
+		// _TSDB_INFO with our SQL.
+		entry3Data["_TSDB_INFO"] = map[string]interface{}{
+			"QUERY_TIME": queryTime,
+			"QUERIES": []interface{}{map[string]interface{}{
+				"query_id": map[string]string{"本地": uuid},
+				"sql":      di.sql,
+				"query_time":     queryTime,
+				"query_region_times": map[string]float64{"本地": queryTime},
+				"query_regions": map[string]interface{}{
+					"本地": map[string]interface{}{
+						"query_sqls": []interface{}{map[string]interface{}{
+							"IP":           "deeptrace-zt",
+							"Sql":          di.sql,
+							"QueryTime":    fmt.Sprintf("%fs", queryTime),
+							"CallbackTime": fmt.Sprintf("%fs", queryTime),
+							"QueryUUID":    uuid,
+							"Error":        "",
+						}},
+					},
+				},
+			}},
+		}
+
+		// _QUERY_IDS.
+		entry3Data["_QUERY_IDS"] = []interface{}{map[string]interface{}{
+			"query_name": "Get All Records-0",
+			"query_id":   map[string]string{"本地": uuid},
+		}}
+
+		entry3Data["TYPE"] = "Application_Fast_List"
+		entry3Data["SCHEMAS"] = schemas
+	}
+
+	entry3 := map[string]interface{}{
+		"name":   "Statistics收到响应",
+		"url":    "/v1/stats/querier/FastList",
+		"status": 200,
+		"time":   nowMs + 150,
+		"data":   entry3Data,
+	}
+
+	if di.err != nil {
+		entry3["status"] = 500
+	}
+
+	return []interface{}{entry0, entry1, entry2, entry3}
+}
 
