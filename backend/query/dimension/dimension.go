@@ -8,33 +8,28 @@ import (
 	"deeptrace-backend/clickhouse"
 )
 
-func handleDimensionResources(deps *Dependencies) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeError(w, "cannot read body", 400)
-			return
-		}
-		var req dimReq
-		if err := json.Unmarshal(body, &req); err != nil {
-			log.Printf("⚠️  dimension-resources unmarshal error: %v", err)
-			writeJSON(w, map[string]interface{}{
-				"OPT_STATUS": "SUCCESS", "TYPE": "dict",
-				"DATA": emptyDimensionResult(),
-			})
-			return
-		}
+type svcKey struct{ id, typ string }
 
-		data := queryDimensionResources(deps.CH, req)
-		writeJSON(w, map[string]interface{}{
-			"OPT_STATUS": "SUCCESS", "TYPE": "dict",
-			"DATA": data,
-		})
+// dimReq mirrors the dimension-resources request body.
+type dimReq struct {
+	Database  string
+	Table     string
+	TimeStart int64
+	TimeEnd   int64
+	Region    string
+	Queries   []struct {
+		Where  string `json:"WHERE"`
+		Select string `json:"SELECT"`
+		TOP    int    `json:"TOP"`
 	}
 }
 
-// queryDimensionResources queries ClickHouse for resource dimension data
-// related to the specified service filter.
+// resourceEntry holds a resource ID + NAME pair.
+type resourceEntry struct {
+	ID   interface{}
+	Name string
+}
+
 func queryDimensionResources(ch *clickhouse.CHService, req dimReq) map[string]interface{} {
 	result := emptyDimensionResult()
 
