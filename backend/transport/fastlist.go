@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/client"
 	"deeptrace-backend/query"
 	"deeptrace-backend/query/flowlog"
@@ -94,21 +95,7 @@ var fastListSkipCols = map[string]struct{}{
 	"is_internet_1": {},
 }
 
-var virtualColumnMap = map[string]string{
-	"auto_service":      "auto_service_id",
-	"auto_instance":     "auto_instance_id",
-	"auto_service_type": "auto_service_type",
-	"chost":             "l3_device_id",
-	"host":              "l3_device_id",
-	"vpc":               "epc_id",
-	"pod_service":       "pod_service_id",
-	"pod_group":         "pod_group_id",
-	"pod_cluster":       "pod_cluster_id",
-	"pod_ns":            "pod_ns_id",
-	"pod_node":          "pod_node_id",
-	"subnet":            "subnet_id",
-	"router":            "router_id",
-}
+
 
 // flattenFastListConditions recursively extracts leaf conditions from a nested
 // AND/OR condition tree (sent by the frontend in QuerierJs format).
@@ -133,10 +120,9 @@ func flattenFastListConditions(conds []interface{}, db string) []string {
 			continue
 		}
 			// Virtual tag (String) compared to number: use the physical ID column.
-			if physicalCol, mapped := virtualColumnMap[col]; mapped {
+			if physicalCol := clickhouse.IDColumn(col); physicalCol != col {
 				if _, isNum := val.(float64); isNum {
 					col = physicalCol
-					// For flow_log, resource columns use _0/_1 suffix.
 					if db == "flow_log" {
 						col += "_0"
 					}
