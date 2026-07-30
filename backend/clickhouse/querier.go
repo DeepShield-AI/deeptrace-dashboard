@@ -180,6 +180,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 
 	var metricExprs []metricExpr
 	isFlowLog := db == "flow_log"
+	isFlowMetrics := db == "flow_metrics"
 
 	for _, item := range items {
 		lower := strings.ToLower(item.Expr)
@@ -310,7 +311,7 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 	}
 	log.Printf("CH QueryTop OK: %d rows", len(data))
 
-	topColMap := map[string]string{
+		topColMap := map[string]string{
 		"auto_service":    "app_service",
 		"auto_instance":   "app_instance",
 		"auto_instance_0": "auto_instance_id_0",
@@ -327,9 +328,22 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 		"pod_cluster_id":  "pod_cluster_id",
 		"pod_ns":          "pod_ns_id",
 		"pod_ns_id":       "pod_ns_id",
+		// Common resource tag _0/_1 mappings (flow_metrics: shared column for both sides).
+		"region_0": "region_id", "region_1": "region_id",
+		"az_0": "az_id", "az_1": "az_id",
+		"subnet_0": "subnet_id", "subnet_1": "subnet_id",
+		"router_0": "router_id", "router_1": "router_id",
+		"l2_vpc_0": "epc_id", "l2_vpc_1": "epc_id",
+		"lb_0": "lb_id", "lb_1": "lb_id",
+		"lb_listener_0": "lb_listener_id", "lb_listener_1": "lb_listener_id",
+		"pod_node_0": "pod_node_id", "pod_node_1": "pod_node_id",
+		"pod_ingress_0": "pod_ingress_id", "pod_ingress_1": "pod_ingress_id",
+		"service_0": "biz_service_id", "service_1": "biz_service_id",
+		"gprocess_0": "gprocess_id_0", "gprocess_1": "gprocess_id_1",
+		"tap_port": "tap_port", "vtap": "vtap_id", "agent": "agent_id",
 	}
 
-	// flow_log-specific column mappings for DeepFlow field names.
+			// flow_log-specific column mappings for DeepFlow field names.
 	flowLogColMap := map[string]string{}
 	if isFlowLog {
 		flowLogColMap = map[string]string{
@@ -342,10 +356,45 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			// Virtual ZT columns: map to real ClickHouse columns for flow_log.
 			"client_node_type": "auto_service_type_0",
 			"server_node_type": "auto_service_type_1",
+			// flow_log: per-side _id_0/_id_1 columns (override flow_metrics shared columns).
+			"region_0": "region_id_0", "region_1": "region_id_1",
+			"az_0": "az_id_0", "az_1": "az_id_1",
+			"chost_0": "l3_device_id_0", "chost_1": "l3_device_id_1",
+			"chost_id_0": "l3_device_id_0", "chost_id_1": "l3_device_id_1",
+			"vpc_0": "epc_id_0", "vpc_1": "epc_id_1",
+			"vpc_id_0": "epc_id_0", "vpc_id_1": "epc_id_1",
+			"subnet_0": "subnet_id_0", "subnet_1": "subnet_id_1",
+			"router_0": "router_id_0", "router_1": "router_id_1",
+			"l2_vpc_0": "epc_id_0", "l2_vpc_1": "epc_id_1",
+			"lb_0": "lb_id_0", "lb_1": "lb_id_1",
+			"lb_listener_0": "lb_listener_id_0", "lb_listener_1": "lb_listener_id_1",
+			"pod_node_0": "pod_node_id_0", "pod_node_1": "pod_node_id_1",
+			"pod_ingress_0": "pod_ingress_id_0", "pod_ingress_1": "pod_ingress_id_1",
+			"pod_ns_0": "pod_ns_id_0", "pod_ns_1": "pod_ns_id_1",
+			"pod_cluster_0": "pod_cluster_id_0", "pod_cluster_1": "pod_cluster_id_1",
+			"pod_service_0": "pod_service_id_0", "pod_service_1": "pod_service_id_1",
+			"pod_group_0": "pod_group_id_0", "pod_group_1": "pod_group_id_1",
+			"pod_0": "pod_id_0", "pod_1": "pod_id_1",
+			"service_0": "biz_service_id_0", "service_1": "biz_service_id_1",
+			"gprocess_0": "gprocess_id_0", "gprocess_1": "gprocess_id_1",
+			"tap_port": "tap_port", "vtap": "vtap_id", "agent": "agent_id",
 		}
 	}
 
-	// flow_log columns that don't exist in raw ClickHouse: skip from tags/group.
+// flow_metrics-specific: _0/_1 both map to same shared column (no per-side columns).
+		flowMetricsColMap := map[string]string{}
+		if isFlowMetrics {
+			flowMetricsColMap = map[string]string{
+				"auto_service_0":   "app_service",
+				"auto_service_1":   "app_service",
+				"auto_instance_0":  "app_instance",
+				"auto_instance_1":  "app_instance",
+				"chost_0": "l3_device_id", "chost_1": "l3_device_id",
+				"chost_id_0": "l3_device_id", "chost_id_1": "l3_device_id",
+			}
+		}
+
+		// flow_log columns that don't exist in raw ClickHouse: skip from tags/group.
 	flowLogSkipCols := map[string]bool{}
 	if isFlowLog {
 		flowLogSkipCols = map[string]bool{
@@ -386,6 +435,8 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			mappedCol = m
 		} else if m2, ok2 := flowLogColMap[colName]; ok2 {
 			mappedCol = m2
+		} else if m3, ok3 := flowMetricsColMap[colName]; ok3 {
+			mappedCol = m3
 		}
 		// For flow_log, dictGet/IP expressions go in SELECT (wrapped in any() if needed) but NOT in GROUP BY.
 		if isFlowLog && (strings.Contains(mappedCol, "dictGet") || strings.Contains(mappedCol, "IPv4")) {
@@ -439,6 +490,8 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			mappedCol = m
 		} else if m2, ok2 := flowLogColMap[gb]; ok2 {
 			mappedCol = m2
+		} else if m3, ok3 := flowMetricsColMap[gb]; ok3 {
+			mappedCol = m3
 		}
 		// For flow_log, dictGet/IP expressions go in SELECT (wrapped in any() if needed) but NOT in GROUP BY.
 		if isFlowLog && (strings.Contains(mappedCol, "dictGet") || strings.Contains(mappedCol, "IPv4")) {

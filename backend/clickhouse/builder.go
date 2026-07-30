@@ -353,14 +353,47 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 		"service_id_1":    "auto_service_id_1",
 		"instance_id_0":   "auto_instance_id_0",
 		"instance_id_1":   "auto_instance_id_1",
+		// Common resource tag mappings.
+		"chost": "l3_device_id", "chost_id": "l3_device_id",
+		"vpc": "epc_id", "vpc_id": "epc_id",
+		"pod_service": "pod_service_id", "pod_service_id": "pod_service_id",
+		"pod_group": "pod_group_id", "pod_group_id": "pod_group_id",
+		"pod_cluster": "pod_cluster_id", "pod_cluster_id": "pod_cluster_id",
+		"pod_ns": "pod_ns_id", "pod_ns_id": "pod_ns_id",
+		"region_0": "region_id", "region_1": "region_id",
+		"az_0": "az_id", "az_1": "az_id",
+		"subnet_0": "subnet_id", "subnet_1": "subnet_id",
+		"router_0": "router_id", "router_1": "router_id",
+		"lb_0": "lb_id", "lb_1": "lb_id",
+		"pod_node_0": "pod_node_id", "pod_node_1": "pod_node_id",
+		"service_0": "biz_service_id", "service_1": "biz_service_id",
+		"gprocess_0": "gprocess_id_0", "gprocess_1": "gprocess_id_1",
 	}
-	// For flow_log tables, map _0/_1 suffixed tag names to resolved names.
+	// For flow_log tables, map _0/_1 suffixed tag names to resolved names or per-side ID columns.
 	if isFlowLog {
 		colMap["auto_service_0"] = "if(auto_service_type_0 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_0), IPv6NumToString(ip6_0)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_0), toUInt64(auto_service_id_0)), ''))"
 		colMap["auto_service_1"] = "if(auto_service_type_1 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_1), IPv6NumToString(ip6_1)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_1), toUInt64(auto_service_id_1)), ''))"
 		colMap["auto_instance_0"] = "if(auto_instance_type_0 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_0), IPv6NumToString(ip6_0)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_instance_type_0), toUInt64(auto_instance_id_0)), toString(auto_instance_id_0)))"
 		colMap["auto_instance_1"] = "if(auto_instance_type_1 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_1), IPv6NumToString(ip6_1)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_instance_type_1), toUInt64(auto_instance_id_1)), toString(auto_instance_id_1)))"
 		colMap["app_service"] = "app_service"
+		// flow_log per-side _id columns override the shared flow_metrics mappings.
+		colMap["region_0"] = "region_id_0"; colMap["region_1"] = "region_id_1"
+		colMap["az_0"] = "az_id_0"; colMap["az_1"] = "az_id_1"
+		colMap["chost_0"] = "l3_device_id_0"; colMap["chost_1"] = "l3_device_id_1"
+		colMap["vpc_0"] = "epc_id_0"; colMap["vpc_1"] = "epc_id_1"
+		colMap["subnet_0"] = "subnet_id_0"; colMap["subnet_1"] = "subnet_id_1"
+		colMap["router_0"] = "router_id_0"; colMap["router_1"] = "router_id_1"
+		colMap["lb_0"] = "lb_id_0"; colMap["lb_1"] = "lb_id_1"
+		colMap["pod_node_0"] = "pod_node_id_0"; colMap["pod_node_1"] = "pod_node_id_1"
+		colMap["pod_0"] = "pod_id_0"; colMap["pod_1"] = "pod_id_1"
+		colMap["pod_ns_0"] = "pod_ns_id_0"; colMap["pod_ns_1"] = "pod_ns_id_1"
+		colMap["pod_cluster_0"] = "pod_cluster_id_0"; colMap["pod_cluster_1"] = "pod_cluster_id_1"
+		colMap["pod_service_0"] = "pod_service_id_0"; colMap["pod_service_1"] = "pod_service_id_1"
+		colMap["pod_group_0"] = "pod_group_id_0"; colMap["pod_group_1"] = "pod_group_id_1"
+		colMap["pod_node_0"] = "pod_node_id_0"; colMap["pod_node_1"] = "pod_node_id_1"
+		colMap["tap_port"] = "tap_port"; colMap["vtap"] = "vtap_id"; colMap["agent"] = "agent_id"
+		colMap["service_0"] = "service_id_0"; colMap["service_1"] = "service_id_1"
+		colMap["gprocess_0"] = "gprocess_id_0"; colMap["gprocess_1"] = "gprocess_id_1"
 	}
 	if isFlowMetrics {
 		colMap["auto_service_0"] = "app_service"
