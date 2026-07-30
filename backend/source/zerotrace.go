@@ -6,7 +6,7 @@ import (
 
 	"deeptrace-backend/client"
 	"deeptrace-backend/query"
-	"deeptrace-backend/query/querier"
+	"deeptrace-backend/query/zt"
 )
 
 type ZerotraceDataSource struct {
@@ -23,13 +23,13 @@ func (d *ZerotraceDataSource) Enabled() bool { return d.zt != nil }
 func (d *ZerotraceDataSource) QueryList(ctx context.Context, req *query.QuerierListRequest) (*query.Result, error) {
 	if d.zt == nil { return nil, nil }
 	body, _ := json.Marshal(req)
-	return querier.QueryList(d.zt, string(body))
+	return zt.QueryList(d.zt, string(body))
 }
 
 func (d *ZerotraceDataSource) QueryTop(ctx context.Context, req *query.QuerierListRequest) (*query.Result, error) {
 	if d.zt == nil { return nil, nil }
 	body, _ := json.Marshal(req)
-	return querier.QueryTop(d.zt, string(body))
+	return zt.QueryTop(d.zt, string(body))
 }
 
 var _ query.QuerierListSource = (*ZerotraceDataSource)(nil)
