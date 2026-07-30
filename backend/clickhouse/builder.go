@@ -306,6 +306,10 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 		}
 	}
 
+	// Use _local table for flow_log to bypass broken Distributed table.
+	if resolvedDB == "flow_log" && !strings.Contains(resolvedTable, "_local") {
+		resolvedTable += "_local"
+	}
 	fullTable := ""
 	if resolvedDB != "" {
 		fullTable = "`" + resolvedDB + "`.`" + resolvedTable + "`"

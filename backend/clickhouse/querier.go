@@ -166,6 +166,10 @@ func (s *CHService) QueryTop(ctx context.Context, req *QuerierRequest) (*QueryTo
 			resolvedTable = table + ".1m"
 		}
 	}
+	// Use _local table for flow_log to bypass broken Distributed table.
+	if db == "flow_log" && !strings.Contains(resolvedTable, "_local") {
+		resolvedTable += "_local"
+	}
 	fullTable := fmt.Sprintf("`%s`.`%s`", db, resolvedTable)
 
 	if len(req.Queries) == 0 {
@@ -876,7 +880,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 
 	// Query unique trace counts (total and calculated/completed).
 	traceCountSQL := fmt.Sprintf(
-		"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log WHERE %s", whereSQL)
+		"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log_local WHERE %s", whereSQL)
 	var totalTraceCount, calcTraceCount int64
 	if rows2, err2 := s.Query(qCtx, traceCountSQL); err2 == nil {
 		if td, e2 := ScanRows(rows2); e2 == nil && len(td) > 0 {
@@ -912,7 +916,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 			CountIf(response_status = 0) AS response_success_count,
 			CountIf(response_status = 3 OR response_status = 5) AS response_status_server_error_count,
 			Avg(response_duration) AS avg_response_duration
-		FROM flow_log.l7_flow_log
+		FROM flow_log.l7_flow_log_local
 		WHERE %s
 		GROUP BY
 			auto_service_id_0, auto_service_type_0,
@@ -949,7 +953,7 @@ func (s *CHService) QueryTraceMap(ctx context.Context, timeStart, timeEnd int64,
 			any(response_code) AS response_code,
 			any(response_exception) AS response_exception,
 			any(response_status) AS response_status
-		FROM flow_log.l7_flow_log
+		FROM flow_log.l7_flow_log_local
 		WHERE %s
 		GROUP BY
 			auto_service_id_0, auto_service_type_0,
