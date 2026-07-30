@@ -14,19 +14,19 @@ type SelectItem struct {
 
 // QuerierRequest mirrors the JSON structure of querier API requests.
 type QuerierRequest struct {
-	Database  string           `json:"DATABASE"`
-	Table     string           `json:"TABLE"`
-	PageIndex int              `json:"PAGE_INDEX"`
-	PageSize  int              `json:"PAGE_SIZE"`
-	Sort      *QuerierSort     `json:"SORT"`
-	Queries   []QuerierSub     `json:"QUERIES"`
-	TimeStart int64            `json:"time_start"`
-	TimeEnd   int64            `json:"time_end"`
-	Regions   []string         `json:"REGIONS"`
-	Total     bool             `json:"TOTAL"`
-	DataSource string           `json:"DATA_SOURCE"`
-	Interval   int                `json:"interval"`
-	Fill       string           `json:"fill"`
+	Database   string       `json:"DATABASE"`
+	Table      string       `json:"TABLE"`
+	PageIndex  int          `json:"PAGE_INDEX"`
+	PageSize   int          `json:"PAGE_SIZE"`
+	Sort       *QuerierSort `json:"SORT"`
+	Queries    []QuerierSub `json:"QUERIES"`
+	TimeStart  int64        `json:"time_start"`
+	TimeEnd    int64        `json:"time_end"`
+	Regions    []string     `json:"REGIONS"`
+	Total      bool         `json:"TOTAL"`
+	DataSource string       `json:"DATA_SOURCE"`
+	Interval   int          `json:"interval"`
+	Fill       string       `json:"fill"`
 }
 
 // QuerierSort holds sort parameters.
@@ -193,9 +193,10 @@ func replaceDSLFunc(expr string) string {
 func findMatchingParen(s string, openIdx int) int {
 	depth := 0
 	for i := openIdx; i < len(s); i++ {
-		if s[i] == '(' {
+		switch s[i] {
+		case '(':
 			depth++
-		} else if s[i] == ')' {
+		case ')':
 			depth--
 			if depth == 0 {
 				return i
@@ -233,21 +234,21 @@ func NormalizeExpr(expr string) string {
 	noBacktickLower := strings.ToLower(noBacktick)
 	// Map common DeepFlow metric names to actual ClickHouse column expressions.
 	metricMaps := map[string]string{
-		"avg(rrt)":               "avg(rrt_sum / nullif(rrt_count, 0))",
-		"sum(rrt)":               "sum(rrt_sum / nullif(rrt_count, 0))",
-		"max(rrt)":               "max(rrt_sum / nullif(rrt_count, 0))",
-		"min(rrt)":               "min(rrt_sum / nullif(rrt_count, 0))",
-		"avg(response_delay)":    "avg(response_duration)",
-		"sum(response_delay)":    "sum(response_duration)",
-		"avg(response_duration)": "avg(response_duration)",
-		"avg(server_error_ratio)":   "avg(nullif(server_error, 0) / nullif(request, 0))",
-		"sum(server_error_ratio)":   "sum(nullif(server_error, 0) / nullif(request, 0))",
-		"avg(client_error_ratio)":   "avg(nullif(client_error, 0) / nullif(request, 0))",
-		"avg(error_ratio)":          "avg(nullif(error, 0) / nullif(request, 0))",
-		"avg(request)":             "avg(request)",
+		"avg(rrt)":                "avg(rrt_sum / nullif(rrt_count, 0))",
+		"sum(rrt)":                "sum(rrt_sum / nullif(rrt_count, 0))",
+		"max(rrt)":                "max(rrt_sum / nullif(rrt_count, 0))",
+		"min(rrt)":                "min(rrt_sum / nullif(rrt_count, 0))",
+		"avg(response_delay)":     "avg(response_duration)",
+		"sum(response_delay)":     "sum(response_duration)",
+		"avg(response_duration)":  "avg(response_duration)",
+		"avg(server_error_ratio)": "avg(nullif(server_error, 0) / nullif(request, 0))",
+		"sum(server_error_ratio)": "sum(nullif(server_error, 0) / nullif(request, 0))",
+		"avg(client_error_ratio)": "avg(nullif(client_error, 0) / nullif(request, 0))",
+		"avg(error_ratio)":        "avg(nullif(error, 0) / nullif(request, 0))",
+		"avg(request)":            "avg(request)",
 		// flow_metrics.network column mappings (DSL names → actual CH columns).
-		"avg(retrans_ratio)":   "avg(retrans_tx)",
-		"avg(zero_win_ratio)":  "avg(zero_win_tx)",
+		"avg(retrans_ratio)":  "avg(retrans_tx)",
+		"avg(zero_win_ratio)": "avg(zero_win_tx)",
 	}
 	if mapped, ok := metricMaps[noBacktickLower]; ok {
 		return mapped
@@ -350,12 +351,12 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 	isFlowMetrics := resolvedDB == "flow_metrics"
 	isFlowLog := resolvedDB == "flow_log"
 	colMap := map[string]string{
-		"auto_service":    "app_service",           // application.* tables
-		"auto_instance":   "app_instance",          // application.* tables
-		"service_id_0":    "auto_service_id_0",
-		"service_id_1":    "auto_service_id_1",
-		"instance_id_0":   "auto_instance_id_0",
-		"instance_id_1":   "auto_instance_id_1",
+		"auto_service":  "app_service",  // application.* tables
+		"auto_instance": "app_instance", // application.* tables
+		"service_id_0":  "auto_service_id_0",
+		"service_id_1":  "auto_service_id_1",
+		"instance_id_0": "auto_instance_id_0",
+		"instance_id_1": "auto_instance_id_1",
 		// Common resource tag mappings.
 		"chost": "l3_device_id", "chost_id": "l3_device_id",
 		"vpc": "epc_id", "vpc_id": "epc_id",
@@ -380,23 +381,41 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 		colMap["auto_instance_1"] = "if(auto_instance_type_1 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_1), IPv6NumToString(ip6_1)), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_instance_type_1), toUInt64(auto_instance_id_1)), toString(auto_instance_id_1)))"
 		colMap["app_service"] = "app_service"
 		// flow_log per-side _id columns override the shared flow_metrics mappings.
-		colMap["region_0"] = "region_id_0"; colMap["region_1"] = "region_id_1"
-		colMap["az_0"] = "az_id_0"; colMap["az_1"] = "az_id_1"
-		colMap["chost_0"] = "l3_device_id_0"; colMap["chost_1"] = "l3_device_id_1"
-		colMap["vpc_0"] = "epc_id_0"; colMap["vpc_1"] = "epc_id_1"
-		colMap["subnet_0"] = "subnet_id_0"; colMap["subnet_1"] = "subnet_id_1"
-		colMap["router_0"] = "router_id_0"; colMap["router_1"] = "router_id_1"
-		colMap["lb_0"] = "lb_id_0"; colMap["lb_1"] = "lb_id_1"
-		colMap["pod_node_0"] = "pod_node_id_0"; colMap["pod_node_1"] = "pod_node_id_1"
-		colMap["pod_0"] = "pod_id_0"; colMap["pod_1"] = "pod_id_1"
-		colMap["pod_ns_0"] = "pod_ns_id_0"; colMap["pod_ns_1"] = "pod_ns_id_1"
-		colMap["pod_cluster_0"] = "pod_cluster_id_0"; colMap["pod_cluster_1"] = "pod_cluster_id_1"
-		colMap["pod_service_0"] = "pod_service_id_0"; colMap["pod_service_1"] = "pod_service_id_1"
-		colMap["pod_group_0"] = "pod_group_id_0"; colMap["pod_group_1"] = "pod_group_id_1"
-		colMap["pod_node_0"] = "pod_node_id_0"; colMap["pod_node_1"] = "pod_node_id_1"
-		colMap["tap_port"] = "tap_port"; colMap["vtap"] = "vtap_id"; colMap["agent"] = "agent_id"
-		colMap["service_0"] = "service_id_0"; colMap["service_1"] = "service_id_1"
-		colMap["gprocess_0"] = "gprocess_id_0"; colMap["gprocess_1"] = "gprocess_id_1"
+		colMap["region_0"] = "region_id_0"
+		colMap["region_1"] = "region_id_1"
+		colMap["az_0"] = "az_id_0"
+		colMap["az_1"] = "az_id_1"
+		colMap["chost_0"] = "l3_device_id_0"
+		colMap["chost_1"] = "l3_device_id_1"
+		colMap["vpc_0"] = "epc_id_0"
+		colMap["vpc_1"] = "epc_id_1"
+		colMap["subnet_0"] = "subnet_id_0"
+		colMap["subnet_1"] = "subnet_id_1"
+		colMap["router_0"] = "router_id_0"
+		colMap["router_1"] = "router_id_1"
+		colMap["lb_0"] = "lb_id_0"
+		colMap["lb_1"] = "lb_id_1"
+		colMap["pod_node_0"] = "pod_node_id_0"
+		colMap["pod_node_1"] = "pod_node_id_1"
+		colMap["pod_0"] = "pod_id_0"
+		colMap["pod_1"] = "pod_id_1"
+		colMap["pod_ns_0"] = "pod_ns_id_0"
+		colMap["pod_ns_1"] = "pod_ns_id_1"
+		colMap["pod_cluster_0"] = "pod_cluster_id_0"
+		colMap["pod_cluster_1"] = "pod_cluster_id_1"
+		colMap["pod_service_0"] = "pod_service_id_0"
+		colMap["pod_service_1"] = "pod_service_id_1"
+		colMap["pod_group_0"] = "pod_group_id_0"
+		colMap["pod_group_1"] = "pod_group_id_1"
+		colMap["pod_node_0"] = "pod_node_id_0"
+		colMap["pod_node_1"] = "pod_node_id_1"
+		colMap["tap_port"] = "tap_port"
+		colMap["vtap"] = "vtap_id"
+		colMap["agent"] = "agent_id"
+		colMap["service_0"] = "service_id_0"
+		colMap["service_1"] = "service_id_1"
+		colMap["gprocess_0"] = "gprocess_id_0"
+		colMap["gprocess_1"] = "gprocess_id_1"
 		colMap["service_1"] = "dictGetOrDefault('biz_service_map', 'name', toUInt64(biz_service_id_1), '')"
 		colMap["service_0"] = "dictGetOrDefault('biz_service_map', 'name', toUInt64(biz_service_id_0), '')"
 		colMap["pod_node_1"] = "dictGetOrDefault('pod_node_map', 'name', toUInt64(pod_node_id_1), '')"
@@ -419,8 +438,8 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 		colMap["region_0"] = "dictGetOrDefault('region_map', 'name', toUInt64(region_id_0), '')"
 	}
 	if isFlowMetrics {
-		colMap["auto_service_0"] = "app_service"
-		colMap["auto_service_1"] = "app_service"
+		colMap["auto_service_0"] = "if(auto_service_type_0 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_0), IPv6NumToString(ip6_0)), ifNull(dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_0), toUInt64(auto_service_id_0)), ''), app_service))"
+		colMap["auto_service_1"] = "if(auto_service_type_1 IN (0, 255), if(is_ipv4 = 1, IPv4NumToString(ip4_1), IPv6NumToString(ip6_1)), ifNull(dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_1), toUInt64(auto_service_id_1)), ''), app_service))"
 	}
 
 	for _, item := range items {
@@ -435,7 +454,7 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 
 		switch {
 		case strings.HasPrefix(lower, "newtag("):
-			tagVal := item.Expr[len("newTag("):len(item.Expr)-1]
+			tagVal := item.Expr[len("newTag(") : len(item.Expr)-1]
 			tagVal = strings.Trim(tagVal, "'\"")
 			constParts = append(constParts, fmt.Sprintf("'%s' AS `%s`", tagVal, item.Key))
 
@@ -443,13 +462,13 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 			col := strings.Trim(item.Expr, "`")
 			// Check for node_type, icon_id, enum function calls disguised as tags.
 			if strings.HasPrefix(lower, "node_type(") {
-				inner := strings.TrimSpace(item.Expr[len("node_type("):len(item.Expr)-1])
+				inner := strings.TrimSpace(item.Expr[len("node_type(") : len(item.Expr)-1])
 				inner = strings.Trim(inner, "\"'")
 				selectParts = append(selectParts, fmt.Sprintf("'%s' AS `%s`", inner, item.Key))
 			} else if strings.HasPrefix(lower, "icon_id(") {
 				selectParts = append(selectParts, fmt.Sprintf("toInt64(-13) AS `%s`", item.Key))
 			} else if strings.HasPrefix(lower, "enum(") {
-				inner := strings.TrimSpace(item.Expr[len("enum("):len(item.Expr)-1])
+				inner := strings.TrimSpace(item.Expr[len("enum(") : len(item.Expr)-1])
 				inner = strings.Trim(inner, "\"'")
 				selectParts = append(selectParts, fmt.Sprintf("`%s` AS `%s`", inner, item.Key))
 				groupByParts = append(groupByParts, fmt.Sprintf("`%s`", inner))
@@ -473,7 +492,7 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 			selectParts = append(selectParts, fmt.Sprintf("%s AS `%s`", sqlExpr, item.Key))
 
 		case strings.HasPrefix(lower, "node_type("):
-			inner := strings.TrimSpace(item.Expr[len("node_type("):len(item.Expr)-1])
+			inner := strings.TrimSpace(item.Expr[len("node_type(") : len(item.Expr)-1])
 			selectParts = append(selectParts, fmt.Sprintf("toString(`%s`) AS `%s`", inner, item.Key))
 			groupByParts = append(groupByParts, fmt.Sprintf("`%s`", inner))
 
@@ -481,7 +500,7 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 			selectParts = append(selectParts, fmt.Sprintf("toInt64(-13) AS `%s`", item.Key))
 
 		case strings.HasPrefix(lower, "enum("):
-			inner := strings.TrimSpace(item.Expr[len("enum("):len(item.Expr)-1])
+			inner := strings.TrimSpace(item.Expr[len("enum(") : len(item.Expr)-1])
 			selectParts = append(selectParts, fmt.Sprintf("`%s` AS `%s`", inner, item.Key))
 			groupByParts = append(groupByParts, fmt.Sprintf("`%s`", inner))
 
@@ -559,21 +578,34 @@ func BuildSelectSQL(req QuerierRequest) (string, error) {
 			for _, pat := range []string{"`" + vcol + "`", vcol} {
 				for {
 					idx := strings.Index(cleanWhere, pat)
-					if idx < 0 { break }
+					if idx < 0 {
+						break
+					}
 					// Find the end of this condition
 					scan := idx
 					for scan < len(cleanWhere) {
-						if cleanWhere[scan] == ')' { scan++; break }
-						if scan > idx && scan+4 < len(cleanWhere) && (cleanWhere[scan:scan+5] == " AND " || cleanWhere[scan:scan+4] == " OR ") { break }
+						if cleanWhere[scan] == ')' {
+							scan++
+							break
+						}
+						if scan > idx && scan+4 < len(cleanWhere) && (cleanWhere[scan:scan+5] == " AND " || cleanWhere[scan:scan+4] == " OR ") {
+							break
+						}
 						scan++
 					}
 					// Backtrack to the start of this condition (AND/OR/EOL)
 					start := idx
 					preAnd := strings.LastIndex(cleanWhere[:start], "AND ")
 					preOr := strings.LastIndex(cleanWhere[:start], "OR ")
-					if preOr > preAnd { preAnd = preOr }
-					if start > 0 && cleanWhere[start-1] == '(' { preAnd = strings.LastIndex(cleanWhere[:start-1], "(") }
-					if preAnd >= 0 { start = preAnd }
+					if preOr > preAnd {
+						preAnd = preOr
+					}
+					if start > 0 && cleanWhere[start-1] == '(' {
+						preAnd = strings.LastIndex(cleanWhere[:start-1], "(")
+					}
+					if preAnd >= 0 {
+						start = preAnd
+					}
 					cleanWhere = cleanWhere[:start] + cleanWhere[scan:]
 				}
 			}
