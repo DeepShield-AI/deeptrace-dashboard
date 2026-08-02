@@ -2,8 +2,10 @@ package transport
 
 import (
 	"io"
-	"log"
 	"net/http"
+
+	"deeptrace-backend/logging"
+	"deeptrace-backend/query"
 )
 
 // RegisterFallback adds the catch-all /api/ handler (for unregistered API paths).
@@ -19,6 +21,13 @@ func handleAPIFallback(deps *Dependencies) http.HandlerFunc {
 			bodyStr = string(body)
 		}
 
+		// Under a forced no-fallback policy the cache is not an acceptable
+		// answer — the request reached the catch-all untouched, so fail.
+		if policy := query.SourcePolicyFromContext(r.Context()); policy.NoFallback {
+			writeSourceError(w, r, "no data source served the query")
+			return
+		}
+
 		// Cache first.
 		if deps.Cache != nil {
 			if cached := deps.Cache.FindWithBody(r.Method, r.URL.RequestURI(), bodyStr); cached != nil {
@@ -28,7 +37,7 @@ func handleAPIFallback(deps *Dependencies) http.HandlerFunc {
 			}
 		}
 
-		log.Printf("❓ UNHANDLED %s %s", r.Method, r.URL.Path)
+		logging.Warnf("UNHANDLED %s %s", r.Method, r.URL.Path)
 		writeSuccess(w, []interface{}{})
 	}
 }

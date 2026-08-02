@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -42,15 +43,29 @@ func handleLoginList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleCurrentUser(w http.ResponseWriter, r *http.Request) {
-	writeSuccess(w, map[string]interface{}{
-		"ID": 1, "USERNAME": "admin", "EMAIL": "admin@deeptrace.local",
+// userStore is set by main when MySQL metadb access is configured.
+var userStore *UserStore
+
+// buildUserResponse assembles the /users/current DATA contract (verified
+// against api_cache GET__api_fuser_v1_users_current_nobody.json: 17 keys).
+// Identity fields come from the real user when available; the account rule
+// objects are stable defaults (the local metadb has no such columns).
+func buildUserResponse(u *UserInfo) map[string]interface{} {
+	id, username, email, orgID := 1, "admin", "admin@deeptrace.local", 4
+	company, uuid := "DeepTrace", "admin-uuid-001"
+	if u != nil {
+		id, username, email, orgID = u.ID, u.Username, u.Email, u.OrgID
+		uuid = fmt.Sprintf("user-uuid-%d", u.ID)
+		company = ""
+	}
+	return map[string]interface{}{
+		"ID": id, "USERNAME": username, "EMAIL": email,
 		"PHONE_NUM": "", "USER_TYPE": 5, "REAL_USER_TYPE": 5,
-		"USERUUID": "admin-uuid-001", "ORG_ID": 4, "COMPANY": "DeepTrace",
+		"USERUUID": uuid, "ORG_ID": orgID, "COMPANY": company,
 		"ACCESS_TOKEN": fakeAccessToken,
 		"ACCOUNT_RULE": map[string]interface{}{
 			"account_allowed_login_time_period": false,
-			"account_allowed_login_min_time": 0, "account_allowed_login_max_time": 0,
+			"account_allowed_login_min_time":    0, "account_allowed_login_max_time": 0,
 			"account_not_login_lock_time": 0, "account_not_change_pwd_lock_time": 0,
 			"account_first_login_change_pwd": false, "account_second_check": false,
 			"account_login_failed_count": 0, "account_login_failed_locked_time": 60,
@@ -72,7 +87,11 @@ func handleCurrentUser(w http.ResponseWriter, r *http.Request) {
 		"FILE_STORAGE_RULE": map[string]interface{}{"file_storage_extension": "rpm,iso,gz,zip,tar", "file_storage_size": 3072},
 		"SEARCH_RULE":       nil,
 		"TENANT_ORG_CONFIG": map[string]interface{}{"org_create_enable": false, "org_create_max_num": 2},
-	})
+	}
+}
+
+func handleCurrentUser(w http.ResponseWriter, r *http.Request) {
+	writeSuccess(w, buildUserResponse(userStore.Get()))
 }
 
 func handleOrgs(w http.ResponseWriter, r *http.Request) {

@@ -22,6 +22,14 @@ func handleStatic(staticDir string) http.HandlerFunc {
 		}
 
 		filePath := filepath.Join(staticDir, path)
+		// Prevent path traversal: r.URL.Path may contain encoded ".." segments
+		// (e.g. /%2e%2e/%2e%2e/etc/passwd) that bypass ServeMux's cleanPath.
+		// Reject any resolved path that escapes staticDir.
+		if rel, err := filepath.Rel(staticDir, filePath); err != nil ||
+			rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			http.NotFound(w, r)
+			return
+		}
 		if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
 			// No cache for HTML files.
 			if strings.HasSuffix(path, ".html") || path == "/" {

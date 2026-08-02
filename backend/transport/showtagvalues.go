@@ -1,10 +1,9 @@
 package transport
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 
+	"deeptrace-backend/query"
 	"deeptrace-backend/query/showtagvalues"
 )
 
@@ -16,14 +15,12 @@ func RegisterShowTagValues(mux *http.ServeMux, deps *Dependencies) {
 // svRequest is the request body for ShowTagValues.
 func handleShowTagValues(deps *Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		bodyStr := string(body)
-
-		var req showtagvalues.SvRequest
-		if err := json.Unmarshal([]byte(bodyStr), &req); err != nil {
-			writeError(w, "bad request", 400)
+		parsed, _, err := parseBody[showtagvalues.SvRequest](r)
+		if err != nil {
+			writeError(w, decodeErrorMessage(err))
 			return
 		}
+		req := *parsed
 		if req.Database == "" {
 			req.Database = "flow_log"
 		}
@@ -33,23 +30,22 @@ func handleShowTagValues(deps *Dependencies) http.HandlerFunc {
 
 		// 1. Try ClickHouse direct query (system.columns.comment → flow_tag → DISTINCT).
 		if data := showtagvalues.ChQueryShowTagValues(req); data != nil {
-			writeJSON(w, map[string]interface{}{
-				"OPT_STATUS":  "SUCCESS",
-				"DESCRIPTION": "",
-				"DATA":        data,
-				"TYPE":        "DBDescription",
-				"SCHEMAS":     map[string]interface{}{},
-			})
+			// Verify protocol: ShowTagValues is only served by ClickHouse.
+			w.Header().Set(sourceHeader, "clickhouse")
+			writeJSON(w, query.DBDescriptionResponse{Data: data})
+			return
+		}
+
+		// Verification protocol: forced no-fallback must fail instead of
+		// silently returning empty (M4/M5).
+		policy := query.SourcePolicyFromContext(r.Context())
+		if policy.NoFallback ||
+			(policy.ForcedSource != "" && policy.ForcedSource != "clickhouse") {
+			writeSourceError(w, r, "no data source served show tag values")
 			return
 		}
 
 		// 3. Fallback: empty.
-		writeJSON(w, map[string]interface{}{
-			"OPT_STATUS":  "SUCCESS",
-			"DESCRIPTION": "",
-			"DATA":        []interface{}{},
-			"TYPE":        "DBDescription",
-			"SCHEMAS":     map[string]interface{}{},
-		})
+		writeJSON(w, query.DBDescriptionResponse{Data: []interface{}{}})
 	}
 }

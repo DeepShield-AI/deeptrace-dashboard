@@ -1,33 +1,32 @@
 package transport
 
 import (
-	"encoding/json"
-	"io"
-	"log"
+	"context"
+	"errors"
 	"net/http"
 
+	"deeptrace-backend/logging"
 	"deeptrace-backend/query"
 )
 
-
 func handleTop(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		parsed, _, err := parseBody[query.QuerierListRequest](r)
 		if err != nil {
-			writeError(w, "cannot read body", 400)
-			return
-		}
-		var req query.QuerierListRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			log.Printf("⚠️  Top unmarshal error: %v", err)
+			if errors.Is(err, ErrBodyRead) {
+				writeError(w, "cannot read body")
+				return
+			}
+			logging.Errorf("Top unmarshal error: %v", err)
 			writeResult(w, &query.Result{Data: []map[string]interface{}{}})
 			return
 		}
+		req := *parsed
 		req.NormalizeQuery()
-		result, err := srv.QueryTop(r.Context(), &req)
-		if err != nil {
-			log.Printf("⚠️  QueryTop error: %v", err)
-			writeResult(w, &query.Result{Data: []map[string]interface{}{}})
+		result, ok := queryWithProvenance(w, r, func(ctx context.Context) (*query.Result, error) {
+			return srv.QueryTop(ctx, &req)
+		})
+		if !ok {
 			return
 		}
 		writeResult(w, result)
@@ -40,25 +39,20 @@ func handleTop(srv *query.QuerierService) http.HandlerFunc {
 
 func handleProfile(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		parsed, _, err := parseBody[query.ProfileRequest](r)
 		if err != nil {
-			writeError(w, "cannot read body", 400)
+			writeError(w, decodeErrorMessage(err))
 			return
 		}
-		var req query.QuerierListRequest
-		if err := json.Unmarshal(body, &req); err != nil {
-			writeError(w, "bad request", 400)
+		req := *parsed
+		result, ok := queryWithProvenance(w, r, func(ctx context.Context) (*query.ProfileResult, error) {
+			return srv.QueryProfile(ctx, &req)
+		})
+		if !ok {
 			return
 		}
-		req.NormalizeQuery()
-		result, err := srv.QueryTopForProfile(r.Context(), &req)
-		if err != nil {
-			log.Printf("⚠️  Profile error: %v", err)
-			writeResult(w, &query.Result{Data: []map[string]interface{}{}})
-			return
-		}
-		writeResult(w, result)
+		// Profile uses its own envelope (result.functions/... — no DATA, no
+		// _querier_region), so writeJSON dispatches ProfileResult.Envelope.
+		writeJSON(w, result)
 	}
 }
-
-

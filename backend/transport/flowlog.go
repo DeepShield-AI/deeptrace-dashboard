@@ -1,14 +1,9 @@
 package transport
 
 import (
-	"context"
-	"encoding/json"
-	"io"
-	"log"
 	"net/http"
-	"time"
 
-	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/logging"
 	"deeptrace-backend/query"
 	"deeptrace-backend/query/flowlog"
 )
@@ -33,17 +28,22 @@ func RegisterFlowLog(mux *http.ServeMux, srv *query.QuerierService) {
 // Uses flowlog.QueryList which bypasses DataSourceChain and goes direct to zerotrace.
 func handleFlowLogDetail(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, err := readRawBody(r)
 		if err != nil {
-			writeError(w, "cannot read body", 400)
+			writeError(w, "cannot read body")
 			return
 		}
 		result, err := flowlog.QueryList(srv.Zerotrace, srv.Enum, string(body))
 		if err != nil {
-			log.Printf("⚠️  FlowLogDetail error: %v", err)
+			logging.Errorf("FlowLogDetail error: %v", err)
+			if query.SourcePolicyFromContext(r.Context()).NoFallback {
+				writeSourceError(w, r, "flow log detail query failed: "+err.Error())
+				return
+			}
 			writeResult(w, &query.Result{Data: []map[string]interface{}{}})
 			return
 		}
+		w.Header().Set(sourceHeader, "zerotrace")
 		writeResult(w, result)
 	}
 }
@@ -53,14 +53,18 @@ func handleFlowLogDetail(srv *query.QuerierService) http.HandlerFunc {
 // Response does NOT include COUNT (confirmed from real API).
 func handleFlowLogDetailInfo(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
+		body, err := readRawBody(r)
 		if err != nil {
-			writeError(w, "cannot read body", 400)
+			writeError(w, "cannot read body")
 			return
 		}
 		result, err := flowlog.QueryInfo(srv.Zerotrace, string(body))
 		if err != nil {
-			log.Printf("⚠️  FlowLogDetailInfo error: %v", err)
+			logging.Errorf("FlowLogDetailInfo error: %v", err)
+			if query.SourcePolicyFromContext(r.Context()).NoFallback {
+				writeSourceError(w, r, "flow log detail info query failed: "+err.Error())
+				return
+			}
 			writeJSON(w, map[string]interface{}{
 				"OPT_STATUS":  "SUCCESS",
 				"DATA":        []interface{}{},
@@ -69,55 +73,35 @@ func handleFlowLogDetailInfo(srv *query.QuerierService) http.HandlerFunc {
 			})
 			return
 		}
-		// Build envelope manually — FlowLogDetailInfo omits COUNT.
-		env := map[string]interface{}{
-			"OPT_STATUS":  "SUCCESS",
-			"DATA":        result.Data,
-			"TYPE":        result.Type,
-			"DESCRIPTION": "",
-		}
-		if result.Fields != nil {
-			env["SCHEMAS"] = result.Fields
-		}
-		writeJSON(w, env)
+		w.Header().Set(sourceHeader, "zerotrace")
+		// FlowLogDetailInfo omits COUNT (confirmed from real API).
+		writeJSON(w, query.FlowLogDetailInfoResponse{
+			Data:   result.Data,
+			Type:   result.Type,
+			Fields: result.Fields,
+		})
 	}
 }
 
 func handleShowAttributes(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if srv.CH == nil || !srv.CH.Enabled() {
-			writeSuccess(w, []interface{}{})
-			return
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeError(w, "cannot read body", 400)
-			return
-		}
-		var req struct {
+		type showAttributesRequest struct {
 			Database string `json:"DATABASE"`
 			Table    string `json:"TABLE"`
 		}
-		if err := json.Unmarshal(body, &req); err != nil {
-			writeSuccess(w, []interface{}{})
-			return
-		}
-		sql := clickhouse.BuildShowAttributesSQL(req.Database, req.Table)
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-		defer cancel()
-		rows, err := srv.CH.Query(ctx, sql)
+		parsed, _, err := parseBody[showAttributesRequest](r)
 		if err != nil {
 			writeSuccess(w, []interface{}{})
 			return
 		}
-		defer rows.Close()
-		data, err := clickhouse.ScanRows(rows)
-		if err != nil {
+		req := *parsed
+		result, err := flowlog.QueryShowAttributes(srv.CH, req.Database, req.Table)
+		if err != nil || result == nil {
 			writeSuccess(w, []interface{}{})
 			return
 		}
 		writeJSON(w, map[string]interface{}{
-			"OPT_STATUS": "SUCCESS", "DATA": data, "COUNT": len(data), "DESCRIPTION": "",
+			"OPT_STATUS": "SUCCESS", "DATA": result.Data, "COUNT": result.Count, "DESCRIPTION": "",
 		})
 	}
 }

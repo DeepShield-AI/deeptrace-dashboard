@@ -2,14 +2,11 @@ package transport
 
 import (
 	"net/http"
-	"strings"
 )
 
 // RegisterDashboard adds dashboard and biz API routes.
 func RegisterDashboard(mux *http.ServeMux, deps *Dependencies) {
 	mux.HandleFunc("/api/df-web/v1/dashboards", handleDashboards(deps))
-	mux.HandleFunc("/api/df-web/v1/biz", handleBiz(deps))
-	mux.HandleFunc("/api/df-web/v1/biz/", handleBiz(deps))
 }
 
 func handleDashboards(deps *Dependencies) http.HandlerFunc {
@@ -18,22 +15,6 @@ func handleDashboards(deps *Dependencies) http.HandlerFunc {
 			return
 		}
 		writeSuccess(w, []interface{}{})
-	}
-}
-
-func handleBiz(deps *Dependencies) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if strings.TrimSuffix(r.URL.Path, "/") == "/api/df-web/v1/biz" {
-			if checkCache(w, deps, r.Method, "/api/df-web/v1/biz") {
-				return
-			}
-			writeSuccess(w, []interface{}{})
-			return
-		}
-		if checkCache(w, deps, r.Method, r.URL.RequestURI()) {
-			return
-		}
-		writeSuccess(w, map[string]interface{}{"ID": 1, "NAME": "默认仪表盘", "JSON_CONFIG": "{}"})
 	}
 }
 

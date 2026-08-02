@@ -4,9 +4,10 @@ import (
 	"net/http"
 
 	"deeptrace-backend/cache"
-	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/client"
 	"deeptrace-backend/query"
+	"deeptrace-backend/query/region"
 )
 
 // Dependencies holds all optional services for transport handlers.
@@ -16,6 +17,7 @@ type Dependencies struct {
 	CH         *clickhouse.CHService
 	Algorithms *client.AlgorithmsService
 	Querier    *query.QuerierService
+	Region     *region.Service
 	StaticDir  string
 }
 
@@ -25,6 +27,7 @@ type Dependencies struct {
 func RegisterAll(mux *http.ServeMux, deps *Dependencies) {
 	RegisterAuth(mux)
 	RegisterDashboard(mux, deps)
+	RegisterBiz(mux, deps)
 	RegisterResource(mux, deps)
 	RegisterMisc(mux, deps)
 
@@ -38,7 +41,11 @@ func RegisterAll(mux *http.ServeMux, deps *Dependencies) {
 	RegisterShowMetrics(mux, deps)
 	RegisterShowTagValues(mux, deps)
 	RegisterSQLQuery(mux, deps)
+
+	// Composer endpoints (real frontend requests, verified in api_cache).
+	RegisterComposer(mux, deps)
 	RegisterTracing(mux, deps.Algorithms)
+	RegisterDurationDetail(mux, deps)
 
 	// Fallback for unhandled /api/ paths.
 	RegisterDimensionResources(mux, deps)

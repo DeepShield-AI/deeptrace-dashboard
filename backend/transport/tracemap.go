@@ -1,11 +1,10 @@
 package transport
 
 import (
-	"encoding/json"
-	"io"
-	"log"
+	"errors"
 	"net/http"
 
+	"deeptrace-backend/logging"
 	"deeptrace-backend/query"
 	"deeptrace-backend/query/tracemap"
 )
@@ -24,26 +23,30 @@ type traceMapRequest struct {
 
 func handleTraceMap(srv *query.QuerierService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			writeError(w, "cannot read body", 400)
-			return
-		}
-
 		// Parse cloud-format request: {time_start, time_end, query_condition}
-		var tReq traceMapRequest
-		if err := json.Unmarshal(body, &tReq); err != nil {
+		parsed, _, err := parseBody[traceMapRequest](r)
+		if err != nil {
+			if errors.Is(err, ErrBodyRead) {
+				writeError(w, "cannot read body")
+				return
+			}
 			writeTraceMap(w, emptyTraceMapResult())
 			return
 		}
+		tReq := *parsed
+
+		policy := query.SourcePolicyFromContext(r.Context())
+		chOK := policy.ForcedSource == "" || query.NormalizeSourceName("clickhouse") == policy.ForcedSource
 
 		// Path 1: Try ClickHouse directly (fast path, best format).
-		if srv.CH != nil && srv.CH.Enabled() {
+		if chOK && srv.CH != nil && srv.CH.Enabled() {
 			chResult, chErr := tracemap.QueryTraceMap(srv.CH, r.Context(), tReq.TimeStart, tReq.TimeEnd, tReq.QueryCondition)
 			if chErr != nil {
-				log.Printf("⚠️  TraceMap CH error: %v", chErr)
+				logging.Errorf("TraceMap CH error: %v", chErr)
 			}
-			if chResult != nil && len(chResult.Data) > 0 {
+			if chResult != nil {
+				// CH handled the query (empty or not) — stop.
+				w.Header().Set(sourceHeader, "clickhouse")
 				writeTraceMap(w, &query.TraceMapResult{
 					NodeData: chResult.Data,
 					ProgressInfo: map[string]interface{}{
@@ -53,16 +56,32 @@ func handleTraceMap(srv *query.QuerierService) http.HandlerFunc {
 				})
 				return
 			}
+			if policy.NoFallback {
+				writeSourceError(w, r, "clickhouse trace map query failed")
+				return
+			}
 		}
 
-		// Path 2: Try DataSourceChain (cache → mock fallback).
+		// Path 2: Try DataSourceChain.
 		if srv.Chain != nil {
+			prov := &query.Provenance{}
+			ctx := query.WithProvenance(r.Context(), prov)
 			chainReq := &query.QuerierListRequest{
 				TimeStart: tReq.TimeStart,
 				TimeEnd:   tReq.TimeEnd,
 			}
-			chainResult, chainErr := srv.Chain.QueryTraceMap(r.Context(), chainReq)
-			if chainErr == nil && chainResult != nil && len(chainResult.NodeData) > 0 {
+			chainResult, chainErr := srv.Chain.QueryTraceMap(ctx, chainReq)
+			if chainErr != nil {
+				logging.Errorf("TraceMap chain error: %v", chainErr)
+				if policy.NoFallback {
+					writeSourceError(w, r, "trace map query failed: "+chainErr.Error())
+					return
+				}
+			}
+			if chainResult != nil {
+				if prov.Source != "" {
+					w.Header().Set(sourceHeader, prov.Source)
+				}
 				writeTraceMap(w, chainResult)
 				return
 			}
