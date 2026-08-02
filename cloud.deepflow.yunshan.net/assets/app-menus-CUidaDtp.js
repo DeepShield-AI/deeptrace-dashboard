@@ -1,0 +1,1 @@
+import{J as e,Y as t}from"./index-Bx61EpAi.js";var n=[...t,...e].map(e=>{let{name:t,path:n,meta:r,redirect:i,children:a}=e;return{name:t,path:n,meta:r,redirect:i,children:a}});export{n as t};

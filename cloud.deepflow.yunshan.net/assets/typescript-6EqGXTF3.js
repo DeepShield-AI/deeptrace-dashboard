@@ -1,0 +1,1 @@
+import{Mr as e,jr as t}from"./other-vendor-yQZZqaf5.js";import"./browser-vendor-DzueQaQs.js";export{t as conf,e as language};

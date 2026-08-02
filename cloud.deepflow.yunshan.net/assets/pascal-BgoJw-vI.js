@@ -1,0 +1,1 @@
+import{nr as e,tr as t}from"./other-vendor-yQZZqaf5.js";export{t as conf,e as language};

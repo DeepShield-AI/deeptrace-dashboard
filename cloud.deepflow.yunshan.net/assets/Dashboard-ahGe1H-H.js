@@ -1,0 +1,1 @@
+import{C as e,D as t,Y as n,b as r,n as i}from"./@vue-vendor-BiAdlnhr.js";import{t as a}from"./_plugin-vue_export-helper-CRt-r6Cj.js";i();var o={};function s(i,a){return n(),e(`div`,null,[...a[0]||=[t(` Dashboard `,-1),r(`div`,{class:`h-20 w-20 border-t-4 border-indigo-500`},null,-1)]])}var c=a(o,[[`render`,s]]);export{c as default};

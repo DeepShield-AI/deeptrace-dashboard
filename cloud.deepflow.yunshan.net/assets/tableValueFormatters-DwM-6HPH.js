@@ -1,0 +1,1 @@
+function e(e,t){let{getText:n,separator:r=`, `,emptyText:i=`--`}=t;return e?.length?e.map(n).join(r):i}export{e as t};

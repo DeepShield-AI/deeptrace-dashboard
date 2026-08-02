@@ -1,0 +1,1 @@
+function e(e){if(!e||typeof e!=`object`)return null;if(`OPT_STATUS`in e)return e;if(`cause`in e){let t=e.cause;if(t&&typeof t==`object`&&`OPT_STATUS`in t)return t}return null}function t(e){if(e)return e.I18N||e.DESCRIPTION}function n(e,t){return e?.OPT_STATUS===t}export{t as n,n as r,e as t};

@@ -1,0 +1,1 @@
+import{a as e}from"./i18n-hpZHBxA1.js";var t={0:e(`所有`),1:e(`接入网络`),3:e(`虚拟网络`)};export{t};

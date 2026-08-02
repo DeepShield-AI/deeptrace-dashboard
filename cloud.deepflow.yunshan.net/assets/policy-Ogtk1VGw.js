@@ -1,0 +1,1 @@
+import{n as e}from"./api-BHRiXTKO.js";function t(t){return e(`/alarm-endPoints`,t)}export{t};

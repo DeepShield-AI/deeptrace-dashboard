@@ -1,0 +1,1 @@
+import{li as e,ui as t}from"./other-vendor-yQZZqaf5.js";export{e as conf,t as language};

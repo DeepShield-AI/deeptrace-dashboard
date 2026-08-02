@@ -1,0 +1,1 @@
+var e={1:`Custom Tag`,2:`Metrics`},t={1:`Tag`,2:`Metrics`},n={1:`string`,2:`int`,3:`float`},r={1:`正常`,2:`异常`};export{n as i,r as n,t as r,e as t};

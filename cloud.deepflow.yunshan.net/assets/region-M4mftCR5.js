@@ -1,0 +1,1 @@
+import{Gt as e}from"./d3-vendor-Hbl8Isc-.js";import{C as t}from"./utils-vendor-1-BVqXzy4r.js";import{t as n}from"./regions-DjoXw3Qo.js";var r=async()=>n().then(n=>(e(t(n,`NAME`),`ID`),e(t(n,`ID`),`NAME`),n));export{r as t};

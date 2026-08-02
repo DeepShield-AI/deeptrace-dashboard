@@ -1,0 +1,1 @@
+import{ni as e,ti as t}from"./other-vendor-yQZZqaf5.js";export{t as conf,e as language};

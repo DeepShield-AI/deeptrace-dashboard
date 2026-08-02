@@ -1,0 +1,1 @@
+import{r as e}from"./base-D40twt7B.js";import{T as t}from"./index-Bx61EpAi.js";var n=async n=>t(await e(`all`,n));export{n as t};
