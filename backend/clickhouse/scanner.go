@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -87,23 +88,23 @@ func valueFromTarget(target interface{}) interface{} {
 			result[i] = s.Index(i).Interface()
 		}
 		return result
-		case reflect.Array:
-			// ClickHouse IPv4 is [4]byte, IPv6 is [16]byte.
-			if rv.Type().Elem().Kind() == reflect.Uint8 {
-				b := make([]byte, rv.Len())
-				for i := 0; i < rv.Len(); i++ {
-					b[i] = byte(rv.Index(i).Uint())
-				}
-				if rv.Len() == 4 {
-					return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
-				}
-				if rv.Len() == 16 {
-					return fmt.Sprintf("%x:%x:%x:%x:%x:%x:%x:%x",
-						b[0:2], b[2:4], b[4:6], b[6:8],
-						b[8:10], b[10:12], b[12:14], b[14:16])
-				}
+	case reflect.Array:
+		// ClickHouse IPv4 is [4]byte, IPv6 is [16]byte.
+		if rv.Type().Elem().Kind() == reflect.Uint8 {
+			b := make([]byte, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				b[i] = byte(rv.Index(i).Uint())
 			}
-			return rv.Interface()
+			if rv.Len() == 4 {
+				return fmt.Sprintf("%d.%d.%d.%d", b[0], b[1], b[2], b[3])
+			}
+			if rv.Len() == 16 {
+				return fmt.Sprintf("%x:%x:%x:%x:%x:%x:%x:%x",
+					b[0:2], b[2:4], b[4:6], b[6:8],
+					b[8:10], b[10:12], b[12:14], b[14:16])
+			}
+		}
+		return rv.Interface()
 	default:
 		return rv.Interface()
 	}
@@ -140,7 +141,7 @@ func ScanRows(rows driver.Rows) ([]map[string]interface{}, error) {
 // Value extraction helpers (used by handlers)
 // ---------------------------------------------------------------------------
 
-// GetStr safely extracts a string from a map.
+// GetStr safely extracts a string from a map (Sprintf fallback for non-strings).
 func GetStr(m map[string]interface{}, key string) string {
 	if v, ok := m[key]; ok && v != nil {
 		return fmt.Sprintf("%v", v)
@@ -148,31 +149,139 @@ func GetStr(m map[string]interface{}, key string) string {
 	return ""
 }
 
-// GetF64 safely extracts a float64 from a map.
-func GetF64(m map[string]interface{}, key string) float64 {
-	if v, ok := m[key]; ok && v != nil {
-		switch val := v.(type) {
-		case float64:
-			return val
-		case uint64:
-			return float64(val)
-		case int64:
-			return float64(val)
-		case float32:
-			return float64(val)
-		default:
-			return 0
+// ToFloat64 converts a value to float64 (supports json.Number).
+func ToFloat64(v interface{}) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
 		}
+	}
+	return 0, false
+}
+
+// ToIntOK converts a value to int (supports json.Number).
+func ToIntOK(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case float32:
+		return int(n), true
+	case int64:
+		return int(n), true
+	case uint64:
+		return int(n), true
+	case int:
+		return n, true
+	case uint8:
+		return int(n), true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return int(f), true
+		}
+	}
+	return 0, false
+}
+
+// ToInt64 converts a value to int64 (0 if not numeric).
+func ToInt64(v interface{}) int64 {
+	if n, ok := ToInt64OK(v); ok {
+		return n
 	}
 	return 0
 }
 
-// GetArr safely extracts a []interface{} from a map (returns nil if missing).
-func GetArr(m map[string]interface{}, key string) []interface{} {
-	if v, ok := m[key]; ok && v != nil {
-		if arr, ok2 := v.([]interface{}); ok2 {
-			return arr
+// ToInt64OK converts a value to int64 (supports json.Number).
+func ToInt64OK(v interface{}) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case int64:
+		return n, true
+	case uint64:
+		return int64(n), true
+	case int:
+		return int64(n), true
+	case uint8:
+		return int64(n), true
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i, true
 		}
 	}
-	return nil
+	return 0, false
+}
+
+// Get returns the typed value for key. It first tries a strict assertion,
+// then a numeric coercion for numeric T (same value set as
+// ToIntOK/ToInt64OK/ToFloat64, including json.Number). Missing, nil or
+// unconvertible values yield the zero value.
+func Get[T any](m map[string]interface{}, key string) T {
+	if v, ok := m[key]; ok && v != nil {
+		if t, ok := v.(T); ok {
+			return t
+		}
+		if t, ok := coerceNumeric[T](v); ok {
+			return t
+		}
+	}
+	var zero T
+	return zero
+}
+
+// coerceNumeric converts a value to the requested numeric type. The switch
+// dispatches on the instantiated T, so any(n).(T) always succeeds inside a
+// matching case.
+func coerceNumeric[T any](v interface{}) (T, bool) {
+	switch any((*new(T))).(type) {
+	case int:
+		n, ok := ToIntOK(v)
+		return any(n).(T), ok
+	case int64:
+		n, ok := ToInt64OK(v)
+		return any(n).(T), ok
+	case float64:
+		n, ok := ToFloat64(v)
+		return any(n).(T), ok
+	case float32:
+		n, ok := ToFloat64(v)
+		return any(float32(n)).(T), ok
+	case uint64:
+		n, ok := toUint64OK(v)
+		return any(n).(T), ok
+	default:
+		var z T
+		return z, false
+	}
+}
+
+// toUint64OK converts a value to uint64 (same value set as ToInt64OK).
+func toUint64OK(v interface{}) (uint64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return uint64(n), true
+	case int64:
+		return uint64(n), true
+	case uint64:
+		return n, true
+	case int:
+		return uint64(n), true
+	case uint8:
+		return uint64(n), true
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return uint64(i), true
+		}
+	}
+	return 0, false
 }
