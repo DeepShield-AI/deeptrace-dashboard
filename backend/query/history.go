@@ -1,21 +1,25 @@
 package query
 
 import (
-	"log"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
+
+	"deeptrace-backend/clickhouse"
 )
 
-// buildHistory converts flat rows with time column into HISTORY arrays.
-func buildHistory(data []map[string]interface{}, sel string, metrics []string,
-	timeStart, timeEnd, interval int64, fill string) []map[string]interface{} {
+// BuildHistory converts flat rows with time column into HISTORY arrays,
+// filling missing time buckets with null when fill param is set.
+// Shared by the Top query paths (query root chain and flowlog).
+func BuildHistory(data []map[string]interface{}, sel string, metrics []string,
+	timeStart, timeEnd, interval int64, fill string,
+) []map[string]interface{} {
 	if len(data) == 0 {
 		return data
 	}
 	mk := historyParseMetrics(sel, metrics)
-	log.Printf("buildHistory: data[0] keys=%v mk=%v", func() []string { var kk []string; for k := range data[0] { kk = append(kk, k) }; return kk }(), func() []string { var kk []string; for k := range mk { kk = append(kk, k) }; return kk }())
 	hasTime := false
 	for k := range data[0] {
 		if k == "time" {
@@ -58,8 +62,8 @@ func buildHistory(data []map[string]interface{}, sel string, metrics []string,
 			}
 		}
 		sort.Slice(g, func(i, j int) bool {
-			ti, _ := histToFloat64(g[i]["time"])
-			tj, _ := histToFloat64(g[j]["time"])
+			ti, _ := historyToFloat64(g[i]["time"])
+			tj, _ := historyToFloat64(g[j]["time"])
 			return ti > tj
 		})
 		var h []map[string]interface{}
@@ -67,14 +71,14 @@ func buildHistory(data []map[string]interface{}, sel string, metrics []string,
 		for _, row := range g {
 			tv := row["time"]
 			if s, ok := tv.(string); ok {
-				if t, err := histParseTime(s); err == nil {
+				if t, err := historyParseTime(s); err == nil {
 					tv = t.Unix()
 				}
 			}
-			if toi, ok := histToFloat64(tv); ok && interval > 0 {
+			if toi, ok := historyToFloat64(tv); ok && interval > 0 {
 				tv = float64(int64(toi) / interval * interval)
 			}
-			toiKey := int64(histToFloat64OrZero(tv))
+			toiKey := int64(historyToFloat64OrZero(tv))
 			if seenTOI[toiKey] {
 				continue
 			}
@@ -87,8 +91,11 @@ func buildHistory(data []map[string]interface{}, sel string, metrics []string,
 			}
 			h = append(h, pt)
 		}
-		if fill != "" && interval > 0 && timeEnd > timeStart {
-			h = histFill(h, mk, timeStart, timeEnd, interval)
+		// Fill missing time buckets with null (capped at 30 points).
+		// fill="none" means missing buckets are NOT synthesized — consistent
+		// with FillNullHistory's three-state semantics (0 / null / none).
+		if fill != "" && fill != "none" && interval > 0 && timeEnd > timeStart {
+			h = historyFill(h, mk, timeStart, timeEnd, interval)
 		}
 		b["HISTORY"] = h
 		r = append(r, b)
@@ -107,7 +114,7 @@ func historyParseMetrics(sel string, metrics []string) map[string]bool {
 			keys[strings.Trim(m, "`")] = true
 		}
 	}
-	for _, item := range histParseSelectList(sel) {
+	for _, item := range clickhouse.ParseSelectList(sel) {
 		lower := strings.ToLower(item.Expr)
 		if strings.HasPrefix(lower, "newtag(") ||
 			strings.HasPrefix(lower, "enum(") ||
@@ -122,94 +129,68 @@ func historyParseMetrics(sel string, metrics []string) map[string]bool {
 	return keys
 }
 
-type histSelectItem struct {
-	Expr string
-	Key  string
-}
-
-func histParseSelectList(sel string) []histSelectItem {
-	var items []histSelectItem
-	if sel == "" {
-		return items
-	}
-	depth := 0
-	start := 0
-	for i, c := range sel + "," {
-		switch c {
-		case '(':
-			depth++
-		case ')':
-			depth--
-		case ',':
-			if depth == 0 {
-				part := strings.TrimSpace(sel[start:i])
-				if part != "" {
-					item := histSelectItem{Expr: part}
-					if idx := strings.LastIndex(strings.ToUpper(part), " AS "); idx >= 0 {
-						item.Key = strings.TrimSpace(part[idx+4:])
-					} else {
-						item.Key = part
-					}
-					item.Key = strings.Trim(item.Key, "`")
-					items = append(items, item)
-				}
-				start = i + 1
-			}
-		}
-	}
-	return items
-}
-
-func histToFloat64(v interface{}) (float64, bool) {
-	log.Printf("histToFloat64: type=%T val=%v", v, v)
+func historyToFloat64(v interface{}) (float64, bool) {
 	switch n := v.(type) {
 	case float64:
 		return n, true
 	case int64:
 		return float64(n), true
-	case uint32:
-		return float64(n), true
-	default:
-		return 0, false
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
+		}
 	}
+	return 0, false
 }
 
-func histToFloat64OrZero(v interface{}) float64 {
-	if f, ok := histToFloat64(v); ok {
+func historyToFloat64OrZero(v interface{}) float64 {
+	if f, ok := historyToFloat64(v); ok {
 		return f
 	}
 	return 0
 }
 
-func histParseTime(s string) (time.Time, error) {
-	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, "2006-01-02T15:04:05Z"} {
-		if t, err := time.Parse(layout, s); err == nil {
+func historyParseTime(s string) (time.Time, error) {
+	formats := []string{"2006-01-02T15:04:05-07:00", "2006-01-02T15:04:05Z07:00", "2006-01-02 15:04:05", "2006-01-02T15:04:05", time.RFC3339}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
 			return t, nil
 		}
 	}
 	return time.Time{}, fmt.Errorf("cannot parse time: %s", s)
 }
 
-func histFill(h []map[string]interface{}, mk map[string]bool, timeStart, timeEnd, interval int64) []map[string]interface{} {
+// historyFill fills missing time buckets with null, capped at 30 points
+// (from timeEnd down to timeStart, truncating the start when the range exceeds 30 buckets).
+func historyFill(h []map[string]interface{}, mk map[string]bool, timeStart, timeEnd, interval int64) []map[string]interface{} {
+	if interval <= 0 {
+		interval = 1
+	}
 	existing := map[int64]bool{}
 	for _, pt := range h {
-		if toi, ok := histToFloat64(pt["toi"]); ok {
+		if toi, ok := historyToFloat64(pt["toi"]); ok {
 			existing[int64(toi)] = true
 		}
 	}
-	for t := timeEnd / interval * interval; t > timeStart/interval*interval; t -= interval {
+	fillEnd := timeEnd - timeEnd%interval
+	fillStart := timeStart - timeStart%interval
+	maxPts := int64(30) * interval
+	if fillEnd-fillStart > maxPts {
+		fillStart = fillEnd - maxPts
+	}
+	for t := fillEnd; t >= fillStart; t -= interval {
 		if existing[t] {
 			continue
 		}
-		pt := map[string]interface{}{"toi": float64(t)}
+		pt := map[string]interface{}{"toi": t}
 		for mk2 := range mk {
 			pt[mk2] = nil
 		}
 		h = append(h, pt)
 	}
 	sort.Slice(h, func(i, j int) bool {
-		ti, _ := histToFloat64(h[i]["toi"])
-		tj, _ := histToFloat64(h[j]["toi"])
+		ti, _ := historyToFloat64(h[i]["toi"])
+		tj, _ := historyToFloat64(h[j]["toi"])
 		return ti > tj
 	})
 	return h

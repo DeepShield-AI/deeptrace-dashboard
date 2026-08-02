@@ -20,7 +20,8 @@ import (
 //	limit     → LIMIT (0 = no limit)
 //	offset    → OFFSET (0 = no offset)
 func BuildBaseSQL(sel, tbl string, extras []string, timeStart, timeEnd int64,
-	groupBy, orderBy, sortedBy string, limit, offset int) string {
+	groupBy, orderBy, sortedBy string, limit, offset int,
+) string {
 	if sel == "" {
 		return ""
 	}

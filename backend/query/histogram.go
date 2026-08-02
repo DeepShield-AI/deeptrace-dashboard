@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/logging"
 )
 
 // QueryHistogram executes a histogram (time distribution / flame graph) query
@@ -32,7 +32,7 @@ func (s *QuerierService) QueryHistogram(ctx context.Context, bodyStr string) (*R
 		return emptyHistogramResult(), nil
 	}
 
-	log.Printf("CH Histogram SQL: %s", sql)
+	logging.Debugf("CH Histogram SQL: %s", sql)
 	histCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 

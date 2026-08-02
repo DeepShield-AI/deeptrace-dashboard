@@ -7,46 +7,40 @@ import (
 	"io"
 	"strings"
 
-	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/client"
 	"deeptrace-backend/enum"
 )
 
 // QuerierService is the single entry point for all query-related business logic.
 type QuerierService struct {
-	Chain      *DataSourceChain
-	CH         *clickhouse.CHService
-	Zerotrace  *client.ZerotraceService
-	Enum       *enum.EnumService
+	Chain     *DataSourceChain
+	CH        *clickhouse.CHService
+	Zerotrace *client.ZerotraceService
+	Enum      *enum.EnumService
 }
 
 func (s *QuerierService) QueryList(ctx context.Context, req *QuerierListRequest) (*Result, error) {
-	// 1. Try DataSourceChain.
+	// 1. Try DataSourceChain (ZT → CH). The chain stops at the first source
+	//    that handles the query — empty results are final (M4), errors bubble
+	//    up for the handler to turn into 502 under a forced no-fallback policy.
 	if s.Chain != nil {
 		result, err := s.Chain.QueryList(ctx, req)
-		if err == nil && result != nil && len(result.Data) > 0 {
-			result.Count = len(result.Data)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil {
+			// Preserve the real total COUNT computed by the source (CH path
+			// runs a dedicated count query); only fill it from the returned
+			// rows when the source didn't provide one (ZT path).
+			if result.Count == 0 {
+				result.Count = len(result.Data)
+			}
 			return result, nil
 		}
 	}
 
-	// 2. Legacy: direct Zerotrace fallback.
-	if s.Zerotrace != nil {
-		sql := buildCHSQL(*req)
-		if sql != "" {
-			rows, err := s.Zerotrace.Query(req.Database, sql)
-			if err == nil && len(rows) > 0 {
-				return &Result{
-					Data:   rows,
-					Count:  len(rows),
-					Type:   "Application_Detail_List",
-					Fields: clickhouse.BuildSchemas(rows[0]),
-				}, nil
-			}
-		}
-	}
-
-	// 3. Empty fallback.
+	// 2. Empty fallback.
 	return &Result{
 		Data:  []map[string]interface{}{},
 		Count: 0,
@@ -54,27 +48,21 @@ func (s *QuerierService) QueryList(ctx context.Context, req *QuerierListRequest)
 	}, nil
 }
 
-// buildCHSQL extracts the SELECT query from a QuerierListRequest.
-func buildCHSQL(req QuerierListRequest) string {
-	if len(req.Queries) == 0 {
-		return ""
-	}
-	return req.Queries[0].Select
-}
-
-
 func (s *QuerierService) QueryTop(ctx context.Context, req *QuerierListRequest) (*Result, error) {
 	// 1. Try DataSourceChain.
 	if s.Chain != nil {
 		result, err := s.Chain.QueryTop(ctx, req)
-		if err == nil && result != nil && len(result.Data) > 0 {
+		if err != nil {
+			return nil, err
+		}
+		if result != nil {
 			// Fill extra fields the frontend expects (query_id, node_type, icon_id, etc.).
 			if len(req.Queries) > 0 {
 				fillTopExtraFields(req.Queries[0].Select, result.Data)
 				if req.IncludeHis && req.Interval > 0 && len(result.Data) > 0 {
-					// If data already has HISTORY (from CH post-processing), skip buildHistory.
+					// If data already has HISTORY (from CH post-processing), skip BuildHistory.
 					if _, hasHist := result.Data[0]["HISTORY"]; !hasHist {
-						result.Data = buildHistory(result.Data, req.Queries[0].Select,
+						result.Data = BuildHistory(result.Data, req.Queries[0].Select,
 							req.Queries[0].Metrics, req.TimeStart, req.TimeEnd, int64(req.Interval), req.Fill)
 					}
 				}
@@ -89,20 +77,20 @@ func (s *QuerierService) QueryTop(ctx context.Context, req *QuerierListRequest) 
 	}, nil
 }
 
-// QueryTopForProfile is a convenience wrapper for Profile queries
-// that doesn't add the TYPE field (profile responses use a different format).
-func (s *QuerierService) QueryTopForProfile(ctx context.Context, req *QuerierListRequest) (*Result, error) {
+// QueryProfile runs the Profile (flame-graph) chain. The Profile wire format
+// differs from Top (result.functions/node_values, no DATA), so it has its own
+// chain and result type.
+func (s *QuerierService) QueryProfile(ctx context.Context, req *ProfileRequest) (*ProfileResult, error) {
 	if s.Chain != nil {
-		result, err := s.Chain.QueryTop(ctx, req)
-		if err == nil && result != nil && len(result.Data) > 0 {
-			result.Count = len(result.Data)
+		result, err := s.Chain.QueryProfile(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil {
 			return result, nil
 		}
 	}
-	return &Result{
-		Data:  []map[string]interface{}{},
-		Count: 0,
-	}, nil
+	return EmptyProfileResult(), nil
 }
 
 // fillTopExtraFields adds default values for SELECT items that ClickHouse can't compute
@@ -156,7 +144,6 @@ func fillTopExtraFields(sel string, data []map[string]interface{}) {
 	}
 }
 
-
 func (s *QuerierService) QueryTraceMap(ctx context.Context, body io.Reader) (*TraceMapResult, error) {
 	// Parse request.
 	var req QuerierListRequest
@@ -168,7 +155,10 @@ func (s *QuerierService) QueryTraceMap(ctx context.Context, body io.Reader) (*Tr
 	// Try DataSourceChain.
 	if s.Chain != nil {
 		result, err := s.Chain.QueryTraceMap(ctx, &req)
-		if err == nil && result != nil && len(result.NodeData) > 0 {
+		if err != nil {
+			return nil, err
+		}
+		if result != nil {
 			return result, nil
 		}
 	}
@@ -185,4 +175,3 @@ func emptyTraceMapResult() *TraceMapResult {
 		},
 	}
 }
-

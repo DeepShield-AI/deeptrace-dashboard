@@ -3,21 +3,21 @@ package flowlog
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 
-	"deeptrace-backend/client"
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/client"
+	"deeptrace-backend/logging"
 	"deeptrace-backend/query"
 )
 
 // infoRequest mirrors the JSON body of a FlowLogDetailInfo request.
 // This is a separate struct from listRequest — the two APIs are independent.
 type infoRequest struct {
-	Database  string `json:"DATABASE"`
-	Table     string `json:"TABLE"`
-	Region    string `json:"REGION"`
-	Queries   []struct {
+	Database string `json:"DATABASE"`
+	Table    string `json:"TABLE"`
+	Region   string `json:"REGION"`
+	Queries  []struct {
 		QueryID string   `json:"QUERY_ID"`
 		Select  string   `json:"SELECT"`
 		Where   string   `json:"WHERE"`
@@ -52,6 +52,11 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	}
 	isFlowLog := db == "flow_log"
 
+	// ZT-direct path (no chain fallback): pre-check unsupported aggregations.
+	if len(req.Queries) > 0 && !ztSupportedSelect(req.Queries[0].Select) {
+		return nil, fmt.Errorf("unsupported aggregation in FlowLogDetailInfo select")
+	}
+
 	// ---------------------------------------------------------------------------
 	// Build SELECT columns
 	// ---------------------------------------------------------------------------
@@ -85,8 +90,7 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 					strings.HasPrefix(lowCol, "gprocess.biz_type") ||
 					strings.HasPrefix(lowCol, "k8s.annotation_") ||
 					strings.HasPrefix(lowCol, "cloud.tag_") ||
-					lowCol == "attribute" ||
-					false { // process_/x_request_ now mapped to process_id_/x_request_id_
+					lowCol == "attribute" {
 					cleanKey := strings.Trim(key, "`")
 					cols = append(cols, fmt.Sprintf("'' AS `%s`", cleanKey))
 					continue
@@ -159,7 +163,7 @@ func QueryInfo(zt *client.ZerotraceService, bodyStr string) (*query.Result, erro
 	sql := fmt.Sprintf("SELECT %s FROM `%s`%s LIMIT 1",
 		selectCols, tbl, whereClause)
 
-	log.Printf("🔍 ZT FlowLogDetailInfo: db=%s sql=%s", db, sql)
+	logging.Debugf("ZT FlowLogDetailInfo: db=%s sql=%s", db, sql)
 
 	// ---------------------------------------------------------------------------
 	// Query deepflow-server

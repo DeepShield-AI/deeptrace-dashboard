@@ -1,15 +1,16 @@
 package fastlist
 
 import (
-	"deeptrace-backend/query"
-	"deeptrace-backend/query/flowlog"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"deeptrace-backend/logging"
+	"deeptrace-backend/query"
+	"deeptrace-backend/query/flowlog"
 
 	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/client"
@@ -17,10 +18,9 @@ import (
 	"deeptrace-backend/query/showtagvalues"
 )
 
-
 type Deps struct {
-	CH       *clickhouse.CHService
-	Cache    interface{}
+	CH        *clickhouse.CHService
+	Cache     interface{}
 	Zerotrace *client.ZerotraceService
 }
 type FastListRequest struct {
@@ -33,7 +33,7 @@ type FastListRequest struct {
 	DataSource string `json:"data_source"`
 	Where      *struct {
 		ResourceSets []struct {
-			ID        string `json:"id"`
+			ID        string        `json:"id"`
 			Condition []interface{} `json:"condition"` // flat [{key,op,val}] or nested AND/OR tree
 		} `json:"resourceSets"`
 		Paths []map[string]string `json:"paths"`
@@ -56,9 +56,12 @@ type FastListDebugInfo struct {
 	err         error
 }
 
-
 // AND/OR condition tree (sent by the frontend in QuerierJs format).
 func FlattenFastListConditions(conds []interface{}, db string) []string {
+	return flattenFastListConditions(conds, db)
+}
+
+func flattenFastListConditions(conds []interface{}, db string) []string {
 	var result []string
 	for _, c := range conds {
 		m, ok := c.(map[string]interface{})
@@ -74,39 +77,105 @@ func FlattenFastListConditions(conds []interface{}, db string) []string {
 			col := fmt.Sprintf("%v", key)
 			val := m["val"]
 
-		// Skip columns that dont exist in raw ClickHouse.
-		if _, skip := clickhouse.FastListSkipCols[col]; skip {
-			continue
-		}
-			// Virtual tag (String) compared to number: use the physical ID column.
-			if physicalCol := clickhouse.IDColumn(col); physicalCol != col {
-				if _, isNum := val.(float64); isNum {
-					col = physicalCol
-					if db == "flow_log" {
-						col += "_0"
-					}
+			// Skip columns that dont exist in raw ClickHouse.
+			if _, skip := clickhouse.FastListSkipCols[col]; skip {
+				continue
+			}
+			// Virtual tags (vpc/chost/region...) filter on their physical ID
+			// column — the frontend may send the ID as a JSON number or as a
+			// numeric string ('1'). Name strings (rare in fast_list) stay
+			// unmapped.
+			if physicalCol := clickhouse.IDColumn(col); physicalCol != col && isNumericValue(val) {
+				col = physicalCol
+				if db == "flow_log" {
+					col += "_0"
 				}
 			}
-
-			// Quote string values, leave numeric values unquoted.
-			var valStr string
-			if s, ok := val.(string); ok {
-				valStr = "'" + s + "'"
-			} else {
-				valStr = fmt.Sprintf("%v", val)
+			// flow_log per-side columns: a bare auto_service_type condition
+			// (e.g. the duration_detail cloud contract) refers to the client
+			// side (_0); auto_service is handled above via IDColumn.
+			if db == "flow_log" && col == "auto_service_type" {
+				col += "_0"
 			}
 
-			result = append(result, "`" + col + "` " + op + " " + valStr)
+			// IN / NOT IN with an array value: `col` IN (v1, v2, ...).
+			// (ClickHouse requires the tuple parentheses — `col` IN v1 is a syntax error.)
+			if arr, isArr := val.([]interface{}); isArr && (op == "IN" || op == "NOT IN") {
+				var items []string
+				for _, iv := range arr {
+					items = append(items, quoteFastListValue(iv))
+				}
+				result = append(result, "`"+col+"` "+op+" ("+strings.Join(items, ", ")+")")
+				continue
+			}
+
+			result = append(result, "`"+col+"` "+op+" "+quoteFastListValue(val))
 			continue
 		}
-		// Branch condition: has "val" array (nested children)
+		// Branch condition: has "val" array (nested children).
+		// The node's own "op" decides how children combine: AND (default,
+		// flatten into the sibling list) or OR (parenthesized unit).
 		if val, hasVal := m["val"]; hasVal {
 			if children, ok := val.([]interface{}); ok {
-				result = append(result, FlattenFastListConditions(children, db)...)
+				op, _ := m["op"].(string)
+				if strings.EqualFold(op, "OR") {
+					// Each child flattens independently; a child that expands
+					// to several AND-ed conditions must stay grouped inside
+					// the OR (OR(AND(a,b), c) → "(a AND b) OR c", not "a OR b OR c").
+					var units []string
+					for _, child := range children {
+						sub := flattenFastListConditions([]interface{}{child}, db)
+						if len(sub) == 1 {
+							units = append(units, sub[0])
+						} else if len(sub) > 1 {
+							units = append(units, "("+strings.Join(sub, " AND ")+")")
+						}
+					}
+					if len(units) > 0 {
+						result = append(result, "("+strings.Join(units, " OR ")+")")
+					}
+					continue
+				}
+				sub := flattenFastListConditions(children, db)
+				if len(sub) == 0 {
+					continue
+				}
+				// "" or "AND": top-level elements are joined with AND by callers.
+				result = append(result, sub...)
 			}
 		}
 	}
 	return result
+}
+
+// quoteFastListValue quotes string values and escapes single quotes;
+// numeric values pass through unquoted.
+func quoteFastListValue(val interface{}) string {
+	if s, ok := val.(string); ok {
+		return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
+	}
+	return fmt.Sprintf("%v", val)
+}
+
+// condColumn extracts the column name from a flat condition fragment
+// ("`subnet_id` = 0" → "subnet_id"; "`ip` = 'x'" → "ip"; IN lists too).
+func condColumn(cond string) string {
+	s := strings.TrimSpace(cond)
+	s = strings.TrimPrefix(s, "(")
+	s = strings.TrimSuffix(s, ")")
+	idx := strings.IndexAny(s, "=<>!")
+	if idx < 0 {
+		idx = strings.Index(s, " IN ")
+		if idx < 0 {
+			return ""
+		}
+	}
+	col := strings.TrimSpace(s[:idx])
+	col = strings.Trim(col, "`")
+	// side-suffixed virtual tags (ip_0/auto_service_1) — check the bare name.
+	col = strings.TrimSuffix(col, "_0")
+	col = strings.TrimSuffix(col, "_1")
+	return col
 }
 
 // Column info for a tag or metric in the QuerierJs intermediate response.
@@ -128,8 +197,12 @@ func NormalizeFastListSelect(sel string) string {
 			end := idx + len(fn) + 1
 			depth := 1
 			for end < len(result) && depth > 0 {
-				if result[end] == '(' { depth++ }
-				if result[end] == ')' { depth-- }
+				if result[end] == '(' {
+					depth++
+				}
+				if result[end] == ')' {
+					depth--
+				}
 				end++
 			}
 			inner := strings.TrimSpace(result[idx+len(fn)+1 : end-1])
@@ -141,9 +214,9 @@ func NormalizeFastListSelect(sel string) string {
 	return result
 }
 
-
 func ChQueryFastList(ch *clickhouse.CHService, db, tbl, selStr string, extras []string,
-	timeStart, timeEnd int64, limit, offset int) []interface{} {
+	timeStart, timeEnd int64, limit, offset int,
+) []interface{} {
 	if ch == nil || !ch.Enabled() {
 		return nil
 	}
@@ -160,42 +233,12 @@ func ChQueryFastList(ch *clickhouse.CHService, db, tbl, selStr string, extras []
 		}
 	}
 	chSel = strings.Join(dedupParts, ", ")
-	// Map virtual tag names to real ClickHouse columns (matching ZT behavior).
+	// Map virtual tag names to real ClickHouse ID columns (via canonical map).
 	chSelParts := strings.Split(chSel, ",")
 	for i, p := range chSelParts {
 		p = strings.TrimSpace(p)
-		// Virtual tag → real ID column mapping (same as topColMap/flowLogColMap for flow_log).
-		switch p {
-		case "pod_node_1": chSelParts[i] = "pod_node_id_1"
-		case "pod_node_0": chSelParts[i] = "pod_node_id_0"
-		case "pod_ns_1": chSelParts[i] = "pod_ns_id_1"
-		case "pod_ns_0": chSelParts[i] = "pod_ns_id_0"
-		case "pod_cluster_1": chSelParts[i] = "pod_cluster_id_1"
-		case "pod_cluster_0": chSelParts[i] = "pod_cluster_id_0"
-		case "pod_service_1": chSelParts[i] = "pod_service_id_1"
-		case "pod_service_0": chSelParts[i] = "pod_service_id_0"
-		case "pod_group_1": chSelParts[i] = "pod_group_id_1"
-		case "pod_group_0": chSelParts[i] = "pod_group_id_0"
-		case "pod_1": chSelParts[i] = "pod_id_1"
-		case "pod_0": chSelParts[i] = "pod_id_0"
-		case "region_1": chSelParts[i] = "region_id_1"
-		case "region_0": chSelParts[i] = "region_id_0"
-		case "az_1": chSelParts[i] = "az_id_1"
-		case "az_0": chSelParts[i] = "az_id_0"
-		case "chost_1": chSelParts[i] = "l3_device_id_1"
-		case "chost_0": chSelParts[i] = "l3_device_id_0"
-		case "vpc_1": chSelParts[i] = "epc_id_1"
-		case "vpc_0": chSelParts[i] = "epc_id_0"
-		case "subnet_1": chSelParts[i] = "subnet_id_1"
-		case "subnet_0": chSelParts[i] = "subnet_id_0"
-		case "router_1": chSelParts[i] = "router_id_1"
-		case "router_0": chSelParts[i] = "router_id_0"
-		case "lb_1": chSelParts[i] = "lb_id_1"
-		case "lb_0": chSelParts[i] = "lb_id_0"
-		case "gprocess_1": chSelParts[i] = "gprocess_id_1"
-		case "gprocess_0": chSelParts[i] = "gprocess_id_0"
-		case "service_1": chSelParts[i] = "service_id_1"
-		case "service_0": chSelParts[i] = "service_id_0"
+		if col := clickhouse.IDColumn(p); col != p {
+			chSelParts[i] = col
 		}
 	}
 	chSel = strings.Join(chSelParts, ", ")
@@ -204,27 +247,55 @@ func ChQueryFastList(ch *clickhouse.CHService, db, tbl, selStr string, extras []
 	// Build SQL with `db`.`table` prefix for ClickHouse.
 	fullTable := fmt.Sprintf("`%s`.`%s`", db, tbl)
 	var clauses []string
-	if timeStart > 0 { clauses = append(clauses, fmt.Sprintf("time >= %d", timeStart)) }
-	if timeEnd > 0 { clauses = append(clauses, fmt.Sprintf("time <= %d", timeEnd)) }
-	// Strip ZT-only virtual columns not present in CH (e.g., role).
+	if timeStart > 0 {
+		clauses = append(clauses, fmt.Sprintf("time >= %d", timeStart))
+	}
+	if timeEnd > 0 {
+		clauses = append(clauses, fmt.Sprintf("time <= %d", timeEnd))
+	}
+	// Strip ZT-only virtual columns not present in CH (e.g., role,
+	// observation_point on log tables); map the virtual ip tag to the
+	// physical IP columns (per-side for flow_log, single-sided for
+	// application_log.log).
 	var chExtras []string
 	for _, e := range extras {
 		skip := false
 		for _, vcol := range []string{"role"} {
-			if strings.Contains(e, "`"+vcol+"`") { skip = true; break }
+			if strings.Contains(e, "`"+vcol+"`") {
+				skip = true
+				break
+			}
 		}
-		if !skip { chExtras = append(chExtras, e) }
+		if !skip {
+			// Drop conditions on columns that don't exist in this table
+			// (e.g. observation_point on application_log.log) — they are
+			// frontend filters the ZT side resolves, not physical columns.
+			// ip is a virtual tag — the physical ip4/ip6 columns always
+			// exist after the mapping below, so skip the column check for it.
+			if col := condColumn(e); col != "" && col != "ip" && !ch.HasColumn(db, tbl, col) {
+				continue
+			}
+			if db == "application_log" {
+				chExtras = append(chExtras, clickhouse.IPConditionToSingle(e))
+			} else {
+				chExtras = append(chExtras, clickhouse.IPConditionToSide(e))
+			}
+		}
 	}
 	clauses = append(clauses, chExtras...)
 	whereClause := ""
-	if len(clauses) > 0 { whereClause = " WHERE " + strings.Join(clauses, " AND ") }
+	if len(clauses) > 0 {
+		whereClause = " WHERE " + strings.Join(clauses, " AND ")
+	}
 	sql := fmt.Sprintf("SELECT %s FROM %s%s GROUP BY %s ORDER BY `count_row` DESC LIMIT %d", sel, fullTable, whereClause, groupBy, limit)
-	if offset > 0 { sql += fmt.Sprintf(" OFFSET %d", offset) }
-	log.Printf("🔍 CH fast_list fallback: db=%s sql=%s", db, sql)
+	if offset > 0 {
+		sql += fmt.Sprintf(" OFFSET %d", offset)
+	}
+	logging.Debugf("CH fast_list fallback: db=%s sql=%s", db, sql)
 
 	rows, err := showmetrics.HTTPQuery(sql)
 	if err != nil {
-		log.Printf("⚠️  CH fast_list error: %v", err)
+		logging.Errorf("CH fast_list error: %v", err)
 		return nil
 	}
 
@@ -243,7 +314,7 @@ func ChQueryFastList(ch *clickhouse.CHService, db, tbl, selStr string, extras []
 		if eErr == nil {
 			for _, er := range eRes {
 				k := fmt.Sprintf("%v", er["toString(value)"])
-				v := showtagvalues.GetSVStr(er, "name_zh")
+				v := clickhouse.Get[string](er, "name_zh")
 				m[k] = v
 			}
 		}
@@ -285,7 +356,7 @@ func ChQueryFastList(ch *clickhouse.CHService, db, tbl, selStr string, extras []
 				}
 			}
 		}
-		r["_querier_region"] = "本地"
+		r["_querier_region"] = clickhouse.QuerierRegion
 		result = append(result, r)
 	}
 	return result
@@ -317,6 +388,11 @@ func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr
 	if idx := strings.IndexByte(selStr, '?'); idx >= 0 {
 		selStr = selStr[:idx]
 	}
+	// Path format: <SELECT>__<TAG>_debug_<N> (e.g. Enum_biz_feature_type__
+	// biz_feature_type_debug_1) — the SELECT column ends at the first "__".
+	if idx := strings.Index(selStr, "__"); idx >= 0 {
+		selStr = selStr[:idx]
+	}
 	if selStr == "" {
 		return nil, nil
 	}
@@ -332,7 +408,8 @@ func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr
 		limit = 999
 	}
 
-	// Resolve table name: for flow_metrics, append data_source suffix.
+	// Resolve table name: for flow_metrics, append data_source suffix, then
+	// fall back to the granularity table the environment actually retains.
 	resolvedTbl := tbl
 	if db == "flow_metrics" && !strings.Contains(tbl, ".") {
 		ds := req.DataSource
@@ -340,6 +417,9 @@ func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr
 			ds = "1m"
 		}
 		resolvedTbl = tbl + "." + ds
+		if resolved := clickhouse.ResolveFlowMetricsTable(ch, db, tbl, req.TimeEnd-req.TimeStart, req.DataSource); resolved != "" {
+			resolvedTbl = resolved
+		}
 	}
 
 	// Build debug info even when ZT is unavailable, so debug mode always produces output.
@@ -365,7 +445,7 @@ func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr
 		return nil, nil
 	}
 
-	log.Printf("🔍 ZT fast_list: db=%s sql=%s", db, di.sql)
+	logging.Debugf("ZT fast_list: db=%s sql=%s", db, di.sql)
 	di.queryStart = time.Now()
 	rows, err := zt.QueryRaw(db, di.sql)
 	di.queryEnd = time.Now()
@@ -373,7 +453,7 @@ func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr
 	di.err = err
 
 	if err != nil {
-		log.Printf("⚠️  fast_list ZT error: %v", err)
+		logging.Errorf("fast_list ZT error: %v", err)
 		// Fallback: query ClickHouse directly when ZT aggregation fails.
 		if chData := ChQueryFastList(ch, db, resolvedTbl, selStr, extras, req.TimeStart, req.TimeEnd, limit, req.Offset); chData != nil {
 			if !debug {
@@ -419,7 +499,7 @@ func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr
 			}
 			r[col] = val
 		}
-		r["_querier_region"] = "本地"
+		r["_querier_region"] = clickhouse.QuerierRegion
 		data = append(data, r)
 	}
 
@@ -428,7 +508,6 @@ func QueryFastList(ch *clickhouse.CHService, zt *client.ZerotraceService, selStr
 	}
 	return data, nil
 }
-
 
 // chQueryFastList queries ClickHouse directly for fast_list when ZT doesn't support the query.
 // normalizeFastListSelect strips DeepFlow DSL functions for CH compatibility.
@@ -450,9 +529,9 @@ func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
 		for _, rs := range req.Where.ResourceSets {
 			conditions := rs.Condition
 			rsEntry := map[string]interface{}{
-				"id": rs.ID,
+				"id":        rs.ID,
 				"condition": conditions,
-				"groupBy": selParts,
+				"groupBy":   selParts,
 			}
 			resourceSets = append(resourceSets, rsEntry)
 		}
@@ -491,10 +570,10 @@ func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
 				"TAGS":    []interface{}{},
 				"METRICS": []interface{}{map[string]interface{}{"func": "count", "key": "row", "params": []interface{}{}}},
 			},
-			"groupBy":  []interface{}{},
+			"groupBy":   []interface{}{},
 			"tableName": di.table,
-			"paths":    paths,
-			"db":       di.db,
+			"paths":     paths,
+			"db":        di.db,
 		},
 	}
 
@@ -583,12 +662,12 @@ func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
 			"OPT_STATUS": "SUCCESS",
 			"DATA": map[string]interface{}{
 				"resource": []interface{}{map[string]interface{}{
-					"sql":          sqlResource,
+					"sql":           sqlResource,
 					"returnTags":    returnTags,
 					"returnMetrics": returnMetrics,
 				}},
 				"path": []interface{}{map[string]interface{}{
-					"sql":          sqlPath,
+					"sql":           sqlPath,
 					"returnTags":    returnTags,
 					"returnMetrics": returnMetrics,
 				}},
@@ -684,7 +763,7 @@ func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
 					}
 					r[col] = val
 				}
-				r["_querier_region"] = "本地"
+				r["_querier_region"] = clickhouse.QuerierRegion
 				dataRows = append(dataRows, r)
 			}
 		}
@@ -694,12 +773,12 @@ func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
 		entry3Data["_TSDB_INFO"] = map[string]interface{}{
 			"QUERY_TIME": queryTime,
 			"QUERIES": []interface{}{map[string]interface{}{
-				"query_id": map[string]string{"本地": uuid},
-				"sql":      di.sql,
-				"query_time":     queryTime,
-				"query_region_times": map[string]float64{"本地": queryTime},
+				"query_id":           map[string]string{clickhouse.QuerierRegion: uuid},
+				"sql":                di.sql,
+				"query_time":         queryTime,
+				"query_region_times": map[string]float64{clickhouse.QuerierRegion: queryTime},
 				"query_regions": map[string]interface{}{
-					"本地": map[string]interface{}{
+					clickhouse.QuerierRegion: map[string]interface{}{
 						"query_sqls": []interface{}{map[string]interface{}{
 							"IP":           "deeptrace-zt",
 							"Sql":          di.sql,
@@ -716,7 +795,7 @@ func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
 		// _QUERY_IDS.
 		entry3Data["_QUERY_IDS"] = []interface{}{map[string]interface{}{
 			"query_name": "Get All Records-0",
-			"query_id":   map[string]string{"本地": uuid},
+			"query_id":   map[string]string{clickhouse.QuerierRegion: uuid},
 		}}
 
 		entry3Data["TYPE"] = "Application_Fast_List"
@@ -738,3 +817,15 @@ func BuildFastListDebug(body []byte, di *FastListDebugInfo) []interface{} {
 	return []interface{}{entry0, entry1, entry2, entry3}
 }
 
+// isNumericValue reports whether a condition value can be compared against an
+// ID column: JSON numbers, ints, or numeric strings ("1").
+func isNumericValue(val interface{}) bool {
+	switch v := val.(type) {
+	case float64, float32, int, int64, uint64, json.Number:
+		return true
+	case string:
+		_, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return err == nil
+	}
+	return false
+}

@@ -3,124 +3,324 @@ package dimension
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"deeptrace-backend/clickhouse"
 )
 
-type SvcKey struct{ id, typ string }
-type DimReq struct {
-	Database  string `json:"DATABASE"`
-	Table     string `json:"TABLE"`
-	TimeStart int64  `json:"time_start"`
-	TimeEnd   int64  `json:"time_end"`
-	Region    string `json:"REGION"`
-	Queries   []struct {
-		Where  string `json:"WHERE"`
-		Select string `json:"SELECT"`
-		TOP    int    `json:"TOP"`
-	} `json:"QUERIES"`
-}
+type (
+	SvcKey struct{ id, typ string }
+	DimReq struct {
+		Database  string `json:"DATABASE"`
+		Table     string `json:"TABLE"`
+		TimeStart int64  `json:"time_start"`
+		TimeEnd   int64  `json:"time_end"`
+		Region    string `json:"REGION"`
+		Queries   []struct {
+			Where  string `json:"WHERE"`
+			Select string `json:"SELECT"`
+			TOP    int    `json:"TOP"`
+		} `json:"QUERIES"`
+	}
+)
 
 type ResourceEntry struct {
 	ID   interface{} `json:"ID"`
 	Name string      `json:"NAME"`
 }
 
+// ipResourceDims maps the ip_resource_map dimension columns to their
+// ATTRIBUTES keys (cloud display names for the resource dimensions).
+var ipResourceDims = []struct{ idCol, nameCol, key string }{
+	{"region_id", "region_name", "region"},
+	{"az_id", "az_name", "az"},
+	{"host_id", "host_name", "host"},
+	{"chost_id", "chost_name", "chost"},
+	{"l3_epc_id", "l3_epc_name", "vpc"},
+	{"router_id", "router_name", "router"},
+	{"dhcpgw_id", "dhcpgw_name", "dhcpgw"},
+	{"lb_id", "lb_name", "lb"},
+	{"natgw_id", "natgw_name", "natgw"},
+	{"subnet_id", "subnet_name", "subnet"},
+	{"redis_id", "redis_name", "redis"},
+	{"rds_id", "rds_name", "rds"},
+	{"pod_cluster_id", "pod_cluster_name", "pod_cluster"},
+	{"pod_ns_id", "pod_ns_name", "pod_ns"},
+	{"pod_node_id", "pod_node_name", "pod_node"},
+	{"pod_group_id", "pod_group_name", "pod_group"},
+	{"pod_service_id", "pod_service_name", "pod_service"},
+	{"pod_id", "pod_name", "pod"},
+}
 
+// QueryIPResourceAttributes resolves the ATTRIBUTES dict for an IP through
+// flow_tag.ip_resource_map (one row per IP with all its resource dimensions).
+// Empty map table (ingester hasn't synced) yields an empty dict — the query
+// itself is the contract; data fills in once the table is populated.
+func QueryIPResourceAttributes(ch *clickhouse.CHService, ctx context.Context, ip string) map[string]interface{} {
+	q := fmt.Sprintf("SELECT * FROM flow_tag.ip_resource_map WHERE ip = '%s' LIMIT 1", strings.ReplaceAll(ip, "'", "''"))
+	rows, err := ch.Query(ctx, q)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	data, err := clickhouse.ScanRows(rows)
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	row := data[0]
+	attrs := map[string]interface{}{}
+	for _, d := range ipResourceDims {
+		id, idOK := row[d.idCol]
+		if !idOK || id == nil {
+			continue
+		}
+		// Only include non-zero IDs (0 = dimension not set for this IP).
+		switch v := id.(type) {
+		case uint64:
+			if v == 0 {
+				continue
+			}
+		case float64:
+			if v == 0 {
+				continue
+			}
+		case int64:
+			if v == 0 {
+				continue
+			}
+		}
+		name := GetStrDim(row, d.nameCol)
+		if name == "" {
+			name = fmt.Sprintf("%v", id)
+		}
+		attrs[d.key] = []map[string]interface{}{{"ID": id, "NAME": name}}
+	}
+	return attrs
+}
+
+// CloudResponse returns the dimension-resources response envelope verified
+// against cloud.deepflow.yunshan.net: a synchronous task result with a
+// DATA.ATTRIBUTES dict (empty when the queried service has no related
+// resource attributes — the observed cloud behavior for resource-analysis).
+func CloudResponse() map[string]interface{} {
+	return map[string]interface{}{
+		"OPT_STATUS":    "SUCCESS",
+		"WAIT_CALLBACK": false,
+		"TASK":          nil,
+		"DESCRIPTION":   "",
+		"TYPE":          "dict",
+		"DATA": map[string]interface{}{
+			"ATTRIBUTES": map[string]interface{}{},
+			"debug":      map[string]interface{}{},
+		},
+	}
+}
+
+// dimEnumKey maps an ATTRIBUTES dimension key to the resource-enumeration
+// response keys (verified against cloud.deepflow.yunshan.net: DATA is a
+// resource enumeration dict — REGION_NUM/REGIONS/AZ_NUM/AZS/... — not an
+// ATTRIBUTES wrapper).
+var dimEnumKey = map[string][2]string{
+	"region":      {"REGIONS", "REGION_NUM"},
+	"az":          {"AZS", "AZ_NUM"},
+	"host":        {"HOSTS", "HOST_NUM"},
+	"chost":       {"CHOSTS", "CHOST_NUM"},
+	"vpc":         {"VPCS", "VPC_NUM"},
+	"router":      {"ROUTERS", "ROUTER_NUM"},
+	"dhcpgw":      {"DHCPGWS", "DHCPGW_NUM"},
+	"lb":          {"LBS", "LB_NUM"},
+	"natgw":       {"NATGWS", "NATGW_NUM"},
+	"subnet":      {"SUBNETS", "SUBNET_NUM"},
+	"redis":       {"REDISES", "REDIS_NUM"},
+	"rds":         {"RDSES", "RDS_NUM"},
+	"pod_cluster": {"POD_CLUSTERS", "POD_CLUSTER_NUM"},
+	"pod_ns":      {"POD_NSES", "POD_NS_NUM"},
+	"pod_node":    {"POD_NODES", "POD_NODE_NUM"},
+	"pod_group":   {"POD_GROUPS", "POD_GROUP_NUM"},
+	"pod_service": {"POD_SERVICES", "POD_SERVICE_NUM"},
+	"pod":         {"PODS", "POD_NUM"},
+}
+
+// QueryDimensionResources resolves the resource-enumeration dict for a
+// dimension-resources request. Response contract (verified against
+// cloud.deepflow.yunshan.net): DATA is a resource enumeration —
+// {"REGION_NUM":1,"REGIONS":[{ID,NAME}],"AZ_NUM":...,"CHOSTS":[...],...}.
+// IP conditions resolve through flow_tag.ip_resource_map; service
+// conditions enumerate the flow_tag dictionaries.
 func QueryDimensionResources(ch *clickhouse.CHService, req DimReq) map[string]interface{} {
 	result := EmptyDimensionResult()
-
 	if ch == nil || !ch.Enabled() {
-		return result
-	}
-
-	// Extract service ID and type from WHERE clause.
-	// WHERE format: "(auto_service_id_0=X AND auto_service_type_0=Y) OR (...)"
-	svcIDs := ExtractServiceIDs(req.Queries)
-
-	// If no service IDs found, try extracting IP from WHERE clause.
-	// WHERE format: "(subnet_id_0=0 AND ip_0='1.2.3.4') OR (subnet_id_1=0 AND ip_1='1.2.3.4')"
-	if len(svcIDs) == 0 {
-		ip := ExtractIPFromWhere(req.Queries)
-		if ip != "" {
-			result["IP_NUM"] = 1
-			result["IPS"] = []string{ip}
-			svcIDs = []string{"0:0"} // placeholder to continue resource queries
-		}
-	}
-	if len(svcIDs) == 0 {
 		return result
 	}
 
 	ctx := context.Background()
 
-	// Build a set of (service_id, service_type) pairs.
-	var svcKeys []SvcKey
-	for _, s := range svcIDs {
-		parts := strings.Split(s, ":")
-		if len(parts) == 2 {
-			svcKeys = append(svcKeys, SvcKey{parts[0], parts[1]})
+	// IP condition → flow_tag.ip_resource_map row (per-IP dimensions).
+	if ip := ExtractIPFromWhere(req.Queries); ip != "" {
+		attrs := QueryIPResourceAttributes(ch, ctx, ip)
+		for dim, entries := range attrs {
+			if keys, ok := dimEnumKey[dim]; ok {
+				result[keys[1]] = len(entries.([]map[string]interface{}))
+				result[keys[0]] = entries
+			}
 		}
-	}
-	if len(svcKeys) == 0 {
 		return result
 	}
 
-	// Query flow_tag mapping tables for each resource type.
-	// Use the service ID to filter related resources via service_id columns.
-	if rows := QueryMapTable(ch, ctx, "region_map", "id", "name"); len(rows) > 0 {
-		result["REGION_NUM"] = len(rows)
-		result["REGIONS"] = rows
+	// Service condition: filter l7_flow_log with the request WHERE (the
+	// query's own SQL conditions — auto_service_id_0=143 AND
+	// auto_service_type_0=11), collect the matching resource IDs from the
+	// per-side columns, then resolve each dimension through its dictionary.
+	// This matches the cloud behavior: DATA lists the resources the queried
+	// service is actually related to (not the full dictionary).
+	svcIDs := ExtractServiceIDs(req.Queries)
+	if len(svcIDs) == 0 {
+		return result
 	}
-	if rows := QueryMapTable(ch, ctx, "az_map", "id", "name"); len(rows) > 0 {
-		result["AZ_NUM"] = len(rows)
-		result["AZS"] = rows
+	where := strings.TrimSpace(req.Queries[0].Where)
+	if where == "" {
+		return result
 	}
-	if rows := QueryMapTable(ch, ctx, "l3_epc_map", "id", "name"); len(rows) > 0 {
-		result["VPC_NUM"] = len(rows)
-		result["VPCS"] = rows
+	// Side (_0/_1) comes from the WHERE columns (auto_service_id_0 → _0).
+	side := "0"
+	if m := sideRE.FindStringSubmatch(where); m != nil {
+		side = m[1]
 	}
-	if rows := QueryMapTable(ch, ctx, "subnet_map", "id", "name"); len(rows) > 0 {
-		result["SUBNET_NUM"] = len(rows)
-		result["SUBNETS"] = rows
+	// Build the flow-log query with the request's own conditions.
+	cleanWhere := clickhouse.CleanWhereClause(where, "flow_log", "l7_flow_log")
+	cleanWhere = clickhouse.IPConditionToSide(cleanWhere)
+	cols := []string{
+		"region_id", "az_id", "l3_epc_id", "subnet_id", "l3_device_id",
+		"pod_cluster_id", "pod_ns_id", "pod_node_id", "pod_group_id", "pod_id",
+		"ip4", "ip6",
 	}
-	if rows := QueryMapTable(ch, ctx, "chost_map", "id", "name"); len(rows) > 0 {
-		result["CHOST_NUM"] = len(rows)
-		result["CHOSTS"] = rows
+	var selCols []string
+	for _, c := range cols {
+		selCols = append(selCols, c+"_"+side)
 	}
-	if rows := QueryMapTable(ch, ctx, "pod_cluster_map", "id", "name"); len(rows) > 0 {
-		result["POD_CLUSTER_NUM"] = len(rows)
-		result["POD_CLUSTERS"] = rows
+	timeWhere := ""
+	if req.TimeStart > 0 {
+		timeWhere = fmt.Sprintf(" AND time >= %d", req.TimeStart)
 	}
-	if rows := QueryMapTable(ch, ctx, "pod_ns_map", "id", "name"); len(rows) > 0 {
-		result["POD_NS_NUM"] = len(rows)
-		result["POD_NSES"] = rows
+	if req.TimeEnd > 0 {
+		timeWhere += fmt.Sprintf(" AND time <= %d", req.TimeEnd)
 	}
-	if rows := QueryMapTable(ch, ctx, "pod_node_map", "id", "name"); len(rows) > 0 {
-		result["POD_NODE_NUM"] = len(rows)
-		result["POD_NODES"] = rows
+	query := fmt.Sprintf("SELECT DISTINCT %s FROM `flow_log`.`l7_flow_log` WHERE %s%s LIMIT 500",
+		strings.Join(selCols, ", "), cleanWhere, timeWhere)
+	rows, err := ch.Query(ctx, query)
+	if err != nil {
+		return result
 	}
-	if rows := QueryMapTable(ch, ctx, "pod_service_map", "id", "name"); len(rows) > 0 {
-		result["POD_SERVICE_NUM"] = len(rows)
-		result["POD_SERVICES"] = rows
+	defer rows.Close()
+	data, err := clickhouse.ScanRows(rows)
+	if err != nil {
+		return result
 	}
-	if rows := QueryMapTable(ch, ctx, "pod_group_map", "id", "name"); len(rows) > 0 {
-		result["POD_GROUP_NUM"] = len(rows)
-		result["POD_GROUPS"] = rows
+	// Collect resource IDs per dimension.
+	idSets := map[string]map[interface{}]bool{}
+	for _, dim := range []string{
+		"region_id", "az_id", "l3_epc_id", "subnet_id", "l3_device_id",
+		"pod_cluster_id", "pod_ns_id", "pod_node_id", "pod_group_id", "pod_id",
+	} {
+		idSets[dim] = map[interface{}]bool{}
 	}
-	if rows := QueryMapTable(ch, ctx, "pod_map", "id", "name"); len(rows) > 0 {
-		result["POD_NUM"] = len(rows)
-		result["PODS"] = rows
+	var ips []string
+	for _, row := range data {
+		for _, dim := range []string{
+			"region_id", "az_id", "l3_epc_id", "subnet_id", "l3_device_id",
+			"pod_cluster_id", "pod_ns_id", "pod_node_id", "pod_group_id", "pod_id",
+		} {
+			if v, ok := row[dim+"_"+side]; ok && v != nil {
+				if isNonZeroID(v) {
+					idSets[dim][v] = true
+				}
+			}
+		}
+		for _, ipCol := range []string{"ip4_" + side, "ip6_" + side} {
+			if v, ok := row[ipCol]; ok && v != nil {
+				if s := fmt.Sprintf("%v", v); s != "" && s != "0" && !isZeroIP(s) {
+					ips = append(ips, s)
+				}
+			}
+		}
 	}
-
-	// For IPs, query distinct IPs from the data table related to the service.
-	if ips := QueryServiceIPs(ch, ctx, svcKeys, req.Database, req.Table); len(ips) > 0 {
+	if len(ips) > 0 {
 		result["IP_NUM"] = len(ips)
 		result["IPS"] = ips
 	}
-
+	// Resolve each dimension through its dictionary with the collected IDs.
+	dimMap := []struct{ dim, table, idCol, nameCol, listKey, numKey string }{
+		{"region_id", "region_map", "id", "name", "REGIONS", "REGION_NUM"},
+		{"az_id", "az_map", "id", "name", "AZS", "AZ_NUM"},
+		{"l3_epc_id", "l3_epc_map", "id", "name", "VPCS", "VPC_NUM"},
+		{"subnet_id", "subnet_map", "id", "name", "SUBNETS", "SUBNET_NUM"},
+		{"l3_device_id", "chost_map", "id", "name", "CHOSTS", "CHOST_NUM"},
+		{"pod_cluster_id", "pod_cluster_map", "id", "name", "POD_CLUSTERS", "POD_CLUSTER_NUM"},
+		{"pod_ns_id", "pod_ns_map", "id", "name", "POD_NSES", "POD_NS_NUM"},
+		{"pod_node_id", "pod_node_map", "id", "name", "POD_NODES", "POD_NODE_NUM"},
+		{"pod_group_id", "pod_group_map", "id", "name", "POD_GROUPS", "POD_GROUP_NUM"},
+		{"pod_id", "pod_map", "id", "name", "PODS", "POD_NUM"},
+	}
+	for _, m := range dimMap {
+		ids := idSets[m.dim]
+		if len(ids) == 0 {
+			continue
+		}
+		var idList []string
+		for id := range ids {
+			idList = append(idList, fmt.Sprintf("%v", id))
+		}
+		q := fmt.Sprintf("SELECT %s, %s FROM flow_tag.%s WHERE %s IN (%s) ORDER BY %s",
+			m.idCol, m.nameCol, m.table, m.idCol, strings.Join(idList, ","), m.idCol)
+		rrows, rerr := ch.Query(ctx, q)
+		if rerr != nil {
+			continue
+		}
+		rdata, rerr := clickhouse.ScanRows(rrows)
+		rrows.Close()
+		if rerr != nil || len(rdata) == 0 {
+			continue
+		}
+		entries := make([]ResourceEntry, 0, len(rdata))
+		for _, r := range rdata {
+			name := GetStrDim(r, m.nameCol)
+			if name == "" {
+				name = fmt.Sprintf("%v", r[m.idCol])
+			}
+			entries = append(entries, ResourceEntry{ID: r[m.idCol], Name: name})
+		}
+		result[m.numKey] = len(entries)
+		result[m.listKey] = entries
+	}
 	return result
+}
+
+// sideRE extracts the _0/_1 side suffix from WHERE conditions.
+var sideRE = regexp.MustCompile(`(?:_id|ip)_(0|1)`)
+
+// isZeroIP reports whether an IP string is all zeros ("0.0.0.0", "::",
+// "0000:0000:...") — ClickHouse stores zero IPs as expanded strings.
+func isZeroIP(s string) bool {
+	if s == "::" || s == "0.0.0.0" {
+		return true
+	}
+	return strings.Trim(s, "0:") == ""
+}
+
+// isNonZeroID reports whether a scanned ID value is a non-zero number.
+func isNonZeroID(v interface{}) bool {
+	switch n := v.(type) {
+	case uint64:
+		return n != 0
+	case int64:
+		return n != 0
+	case int:
+		return n != 0
+	case float64:
+		return n != 0
+	}
+	return false
 }
 
 // queryMapTable queries a flow_tag mapping table for ID+NAME pairs.
@@ -190,7 +390,8 @@ func ExtractServiceIDs(queries []struct {
 	Where  string `json:"WHERE"`
 	Select string `json:"SELECT"`
 	TOP    int    `json:"TOP"`
-}) []string {
+},
+) []string {
 	for _, q := range queries {
 		w := q.Where
 
@@ -260,25 +461,19 @@ func ExtractServiceIDs(queries []struct {
 }
 
 // getStrDim safely extracts a string from a map.
-// extractIPFromWhere extracts an IP address from WHERE clause conditions like ip_0='1.2.3.4'.
+// extractIPFromWhere extracts an IP address from WHERE clause conditions
+// like ip_0='1.2.3.4' or `ip_1`='1.2.3.4' (backtick-quoted variants appear
+// in real requests — the plain "ip_1='" match missed them).
 func ExtractIPFromWhere(queries []struct {
 	Where  string `json:"WHERE"`
 	Select string `json:"SELECT"`
 	TOP    int    `json:"TOP"`
-}) string {
+},
+) string {
+	ipRE := regexp.MustCompile("(?:`?)ip_[01](?:`?)=\\s*'([^']+)'")
 	for _, q := range queries {
-		w := q.Where
-		// Look for ip_0='...' or ip_1='...'
-		for _, prefix := range []string{"ip_0='", "ip_1='"} {
-			idx := strings.Index(w, prefix)
-			if idx < 0 {
-				continue
-			}
-			rest := w[idx+len(prefix):]
-			end := strings.Index(rest, "'")
-			if end > 0 {
-				return rest[:end]
-			}
+		if m := ipRE.FindStringSubmatch(q.Where); m != nil {
+			return m[1]
 		}
 	}
 	return ""

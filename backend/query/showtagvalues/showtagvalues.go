@@ -3,12 +3,13 @@ package showtagvalues
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/enum"
 	"deeptrace-backend/query/showmetrics"
 )
 
@@ -20,8 +21,6 @@ type SvRequest struct {
 	Offset   int    `json:"OFFSET"`
 	Limit    *int   `json:"LIMIT"`
 }
-
-
 
 // ---------------------------------------------------------------------------
 // ClickHouse direct query for ShowTagValues
@@ -95,12 +94,12 @@ func QueryEnumFromComment(db, tbl, tag, likeFilter string, limit int) []interfac
 		return nil
 	}
 
-	comment := GetSVStr(rows[0], "comment")
+	comment := clickhouse.Get[string](rows[0], "comment")
 	if comment == "" {
 		return nil
 	}
 
-	colType := GetSVStr(rows[0], "type")
+	colType := clickhouse.Get[string](rows[0], "type")
 
 	// Parse comment for enum patterns: "0:normal, 1:error" or "0:正常, 1:异常"
 	// Also handles "响应状态 0:正常, 1:异常" (prefix text before first digit:value)
@@ -131,11 +130,12 @@ func QueryEnumFromComment(db, tbl, tag, likeFilter string, limit int) []interfac
 
 // parseEnumComment parses a column comment for enum patterns.
 // Recognized formats:
-//   "0:正常, 1:异常, 2:超时"
-//   "响应状态 0:正常, 1:异常"
-//   "0:N/A, 20:http1, 21:http2"
-//   "0:未知 1:其他, 20:http1"  (space-separated + comma-separated mixed)
-//   "0:正常, 1:异常 ,2:不存在，3:服务端异常"  (fullwidth Chinese commas)
+//
+//	"0:正常, 1:异常, 2:超时"
+//	"响应状态 0:正常, 1:异常"
+//	"0:N/A, 20:http1, 21:http2"
+//	"0:未知 1:其他, 20:http1"  (space-separated + comma-separated mixed)
+//	"0:正常, 1:异常 ,2:不存在，3:服务端异常"  (fullwidth Chinese commas)
 func ParseEnumComment(comment, colType string) []enumEntry {
 	// Try JSON-like descriptions first: {"0":"正常","1":"异常"}
 	if strings.HasPrefix(comment, "{") {
@@ -357,8 +357,8 @@ func EnrichEnumEntries(data []interface{}, tag string) {
 		for _, row := range rows {
 			key := fmt.Sprintf("%v", row["value"])
 			lookup[key] = enumInfo{
-				name: GetSVStr(row, "name_zh"),
-				desc: GetSVStr(row, "description_zh"),
+				name: clickhouse.Get[string](row, "name_zh"),
+				desc: clickhouse.Get[string](row, "description_zh"),
 			}
 		}
 	}
@@ -425,8 +425,8 @@ func QueryEnumFromFlowTag(tag, like string, limit int) []interface{} {
 		}
 		entries = append(entries, enumEntry{
 			Value:       val,
-			DisplayName: GetSVStr(row, "name_zh"),
-			Description: GetSVStr(row, "description_zh"),
+			DisplayName: clickhouse.Get[string](row, "name_zh"),
+			Description: clickhouse.Get[string](row, "description_zh"),
 		})
 	}
 
@@ -449,19 +449,21 @@ func QueryEnumFromFlowTag(tag, like string, limit int) []interface{} {
 
 // builtinEnumFallback provides hardcoded enum values for well-known tags
 // that have fixed mappings not stored in flow_tag.int_enum_map.
-// Matches the fallback enum maps in enum.go and the cloud API behavior.
-var BuiltinEnumFallback = map[string]map[string]string{
-	"event_type": {
-		"read":      "读",
-		"write":     "写",
-	},
-	"observation_point": {
-		"c": "客户端网卡", "s": "服务端网卡",
-		"c-p": "客户侧网络", "s-p": "服务侧网络",
-		"c-app": "客户端应用", "s-app": "服务端应用",
-		"app": "应用", "rest": "其他",
-		"c-gw": "客户端网关", "s-gw": "服务端网关",
-	},
+// Based on the canonical enum package maps, extended with string keys and
+// gateway observation points not present in the shared maps.
+var BuiltinEnumFallback = buildBuiltinEnumFallback()
+
+func buildBuiltinEnumFallback() map[string]map[string]string {
+	fb := enum.FallbackEnumMaps()
+	if op, ok := fb["observation_point"]; ok {
+		op["c-gw"] = "客户端网关"
+		op["s-gw"] = "服务端网关"
+	}
+	if et, ok := fb["event_type"]; ok {
+		et["read"] = "读"
+		et["write"] = "写"
+	}
+	return fb
 }
 
 // queryBuiltinEnumFallback returns hardcoded enum values for known tags
@@ -510,40 +512,39 @@ func QueryBuiltinEnumFallback(tag, like string, limit int) []interface{} {
 	return result
 }
 
-
 // ---------------------------------------------------------------------------
 // Resource tag handling — query flow_tag mapping tables
 // ---------------------------------------------------------------------------
 
 // resourceTagInfo describes how to query a resource tag.
 type resourceTagInfo struct {
-	FlowTagTable  string // flow_tag table name
-	FlowTagIDCol  string // ID column name in flow_tag table
+	FlowTagTable   string // flow_tag table name
+	FlowTagIDCol   string // ID column name in flow_tag table
 	FlowTagNameCol string // name column name in flow_tag table
-	FlowLogIDCol  string // column in flow_log (with _0/_1 suffix)
-	MetricsIDCol  string // column in flow_metrics
+	FlowLogIDCol   string // column in flow_log (with _0/_1 suffix)
+	MetricsIDCol   string // column in flow_metrics
 }
 
 // resourceTagMap maps resource tag names to their metadata.
 var ResourceTagMap = map[string]resourceTagInfo{
-	"region":       {"region_map", "id", "name", "region_id", "region_id"},
-	"az":           {"az_map", "id", "name", "az_id", "az_id"},
-	"vpc":          {"l3_epc_map", "id", "name", "epc_id", "l3_epc_id"},
-	"l2_vpc":       {"l3_epc_map", "id", "name", "epc_id", "l3_epc_id"},
-	"chost":        {"chost_map", "id", "name", "l3_device_id", "l3_device_id"},
-	"host":         {"chost_map", "id", "name", "l3_device_id", "l3_device_id"},
-	"pod_service":  {"pod_service_map", "id", "name", "pod_service_id", "pod_service_id"},
-	"pod_cluster":  {"pod_cluster_map", "id", "name", "pod_cluster_id", "pod_cluster_id"},
-	"pod_group":    {"pod_group_map", "id", "name", "pod_group_id", "pod_group_id"},
-	"pod_ns":       {"pod_ns_map", "id", "name", "pod_ns_id", "pod_ns_id"},
-	"subnet":       {"", "", "", "subnet_id", "subnet_id"},
-	"router":       {"", "", "", "router_id", "router_id"},
-	"lb":           {"","","","lb_id", "lb_id"},
-	"lb_listener":  {"lb_listener_map", "id", "name", "lb_listener_id", "lb_listener_id"},
-	"pod_node":     {"pod_node_map", "id", "name", "pod_node_id", "pod_node_id"},
-	"pod_ingress":  {"pod_ingress_map", "id", "name", "pod_ingress_id", "pod_ingress_id"},
-	"nat_gateway":  {"", "", "", "nat_gateway_id", "nat_gateway_id"},
-	"service":      {"biz_service_map", "id", "name", "biz_service_id", "biz_service_id"},
+	"region":      {"region_map", "id", "name", "region_id", "region_id"},
+	"az":          {"az_map", "id", "name", "az_id", "az_id"},
+	"vpc":         {"l3_epc_map", "id", "name", "epc_id", "l3_epc_id"},
+	"l2_vpc":      {"l3_epc_map", "id", "name", "epc_id", "l3_epc_id"},
+	"chost":       {"chost_map", "id", "name", "l3_device_id", "l3_device_id"},
+	"host":        {"chost_map", "id", "name", "l3_device_id", "l3_device_id"},
+	"pod_service": {"pod_service_map", "id", "name", "pod_service_id", "pod_service_id"},
+	"pod_cluster": {"pod_cluster_map", "id", "name", "pod_cluster_id", "pod_cluster_id"},
+	"pod_group":   {"pod_group_map", "id", "name", "pod_group_id", "pod_group_id"},
+	"pod_ns":      {"pod_ns_map", "id", "name", "pod_ns_id", "pod_ns_id"},
+	"subnet":      {"", "", "", "subnet_id", "subnet_id"},
+	"router":      {"", "", "", "router_id", "router_id"},
+	"lb":          {"", "", "", "lb_id", "lb_id"},
+	"lb_listener": {"lb_listener_map", "id", "name", "lb_listener_id", "lb_listener_id"},
+	"pod_node":    {"pod_node_map", "id", "name", "pod_node_id", "pod_node_id"},
+	"pod_ingress": {"pod_ingress_map", "id", "name", "pod_ingress_id", "pod_ingress_id"},
+	"nat_gateway": {"", "", "", "nat_gateway_id", "nat_gateway_id"},
+	"service":     {"biz_service_map", "id", "name", "biz_service_id", "biz_service_id"},
 }
 
 // queryResourceTag queries tag values from flow_tag mapping tables or data table.
@@ -588,7 +589,7 @@ func QueryFlowTagTable(table, idCol, nameCol string, limit int) []interface{} {
 	result := make([]interface{}, 0, len(rows))
 	for _, row := range rows {
 		id := row[idCol]
-		name := GetSVStr(row, nameCol)
+		name := clickhouse.Get[string](row, nameCol)
 		if name == "" {
 			name = fmt.Sprintf("%v", id)
 		}
@@ -623,22 +624,22 @@ func ResolveColumnName(db, tbl, tag string) string {
 
 	// Column name mappings from the existing querier system.
 	colMap := map[string]string{
-		"auto_service":     "app_service",
-		"auto_instance":    "app_instance",
-		"auto_service_0":   "auto_service_id_0",
-		"auto_service_1":   "auto_service_id_1",
-		"auto_instance_0":  "auto_instance_id_0",
-		"auto_instance_1":  "auto_instance_id_1",
-		"service_id_0":     "auto_service_id_0",
-		"service_id_1":     "auto_service_id_1",
-		"instance_id_0":    "auto_instance_id_0",
-		"instance_id_1":    "auto_instance_id_1",
-		"chost_id":         "l3_device_id",
-		"vpc_id":           "epc_id",
-		"pod_service_id":   "pod_service_id",
-		"pod_cluster_id":   "pod_cluster_id",
-		"pod_group_id":     "pod_group_id",
-		"pod_ns_id":        "pod_ns_id",
+		"auto_service":    "app_service",
+		"auto_instance":   "app_instance",
+		"auto_service_0":  "auto_service_id_0",
+		"auto_service_1":  "auto_service_id_1",
+		"auto_instance_0": "auto_instance_id_0",
+		"auto_instance_1": "auto_instance_id_1",
+		"service_id_0":    "auto_service_id_0",
+		"service_id_1":    "auto_service_id_1",
+		"instance_id_0":   "auto_instance_id_0",
+		"instance_id_1":   "auto_instance_id_1",
+		"chost_id":        "l3_device_id",
+		"vpc_id":          "epc_id",
+		"pod_service_id":  "pod_service_id",
+		"pod_cluster_id":  "pod_cluster_id",
+		"pod_group_id":    "pod_group_id",
+		"pod_ns_id":       "pod_ns_id",
 	}
 
 	// flow_log-specific column mappings (event_type→l7_protocol only for flow_log).
@@ -745,10 +746,11 @@ func QueryDistinctValues(req SvRequest, colName, like string, limit int) []inter
 
 // parseLikeToWhere converts a LIKE expression to SQL WHERE conditions.
 // Supported formats:
-//   `col`=value        → col = value
-//   exist(col)         → col != 0 (for ID columns)
-//   expr AND expr      → combined with AND
-//   expr OR expr       → combined with OR
+//
+//	`col`=value        → col = value
+//	exist(col)         → col != 0 (for ID columns)
+//	expr AND expr      → combined with AND
+//	expr OR expr       → combined with OR
 func ParseLikeToWhere(like, currentTag string) []string {
 	if like == "" {
 		return nil
@@ -819,23 +821,4 @@ func LimitVal(limit *int) int {
 	return *limit
 }
 
-// getSVStr safely extracts a string from a map.
-func GetSVStr(m map[string]interface{}, key string) string {
-	if v, ok := m[key]; ok && v != nil {
-		if s, ok := v.(string); ok {
-			return s
-		}
-	}
-	return ""
-}
-
 // minInt returns the smaller of a and b.
-func MinInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// Ensure unused import silencing (these are used transitively).
-var _ = log.Printf

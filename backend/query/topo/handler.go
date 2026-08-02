@@ -1,16 +1,15 @@
 package topo
 
 import (
-	"log"
 	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/logging"
 	"deeptrace-backend/query"
 )
-
 
 func QueryTopoFlowMetrics(ch *clickhouse.CHService, req query.QuerierListRequest) map[string]interface{} {
 	if ch == nil || !ch.Enabled() {
@@ -107,13 +106,13 @@ func QueryTopoFlowMetrics(ch *clickhouse.CHService, req query.QuerierListRequest
 		fullTable, ts, te,
 		orderBy)
 
-	log.Printf("🔍 CH Topo (%s): %s", tbl, sql[:min(len(sql), 300)])
+	logging.Debugf("CH Topo (%s): %s", tbl, sql[:min(len(sql), 300)])
 
 	qCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	rows, err := ch.Query(qCtx, sql)
 	if err != nil {
-		log.Printf("⚠️  CH Topo (%s) error: %v", tbl, err)
+		logging.Errorf("CH Topo (%s) error: %v", tbl, err)
 		return map[string]interface{}{"instance_data": []interface{}{}, "peers_data": []interface{}{}}
 	}
 	defer rows.Close()
@@ -188,17 +187,17 @@ func QueryTopoFlowMetrics(ch *clickhouse.CHService, req query.QuerierListRequest
 			"uid_1":                   uid1,
 			"resource_l7_protocol_0":  row["resource_l7_protocol_0"],
 			"resource_l7_protocol_1":  row["resource_l7_protocol_1"],
-			"_querier_region":         "本地",
+			"_querier_region":         clickhouse.QuerierRegion,
 		}
 		// Set metrics
 		peer[rateKey] = rate
 		if !isAppMap {
 			// network_map specific metrics
-			peer["TCP 重传比例"] = errRatio  // TCP retransmission ratio
-			peer["TCP 建连失败比例"] = row["establish_fail_ratio"]  // TCP establish fail ratio
+			peer["TCP 重传比例"] = errRatio                      // TCP retransmission ratio
+			peer["TCP 建连失败比例"] = row["establish_fail_ratio"] // TCP establish fail ratio
 			peer[latencyKey] = latency
 		} else {
-			peer["服务端异常比例"] = errRatio  // server error ratio
+			peer["服务端异常比例"] = errRatio // server error ratio
 			peer[latencyKey] = latency
 		}
 
@@ -217,7 +216,8 @@ func QueryTopoFlowMetrics(ch *clickhouse.CHService, req query.QuerierListRequest
 func AppendTopoInstanceFm(instances []map[string]interface{}, seen map[string]bool,
 	row map[string]interface{}, suffix, role string, uid string,
 	svcName string, rate, errRatio, latency interface{},
-	rateKey, errKey, latencyKey string) []map[string]interface{} {
+	rateKey, errKey, latencyKey string,
+) []map[string]interface{} {
 	svcID := fmt.Sprintf("%v", row["auto_service_id"+suffix])
 	svcType := fmt.Sprintf("%v", row["auto_service_type"+suffix])
 	obs := fmt.Sprintf("%v", row["observation_point"])
@@ -238,19 +238,19 @@ func AppendTopoInstanceFm(instances []map[string]interface{}, seen map[string]bo
 	}
 
 	inst := map[string]interface{}{
-		"rs_set_id":           "R1",
-		"observation_point":   obs,
+		"rs_set_id":               "R1",
+		"observation_point":       obs,
 		"Enum(observation_point)": row["Enum(observation_point)"],
-		"role":                role,
-		"_querier_region":     "本地",
-		"uid":                 uid,
-		"node_type":           row[nodeTypeKey],
-		"icon_id":             row[iconIDKey],
-		"auto_service_id":     row["auto_service_id"+suffix],
-		"auto_service":        svcName,
-		"auto_service_type":   row["auto_service_type"+suffix],
-		"is_internet":         0,
-		"resource_l7_protocol": row["resource_l7_protocol_0"],
+		"role":                    role,
+		"_querier_region":         clickhouse.QuerierRegion,
+		"uid":                     uid,
+		"node_type":               row[nodeTypeKey],
+		"icon_id":                 row[iconIDKey],
+		"auto_service_id":         row["auto_service_id"+suffix],
+		"auto_service":            svcName,
+		"auto_service_type":       row["auto_service_type"+suffix],
+		"is_internet":             0,
+		"resource_l7_protocol":    row["resource_l7_protocol_0"],
 	}
 	// Set metrics from passed-in values (keys vary by table type).
 	if rate != nil {
@@ -265,10 +265,9 @@ func AppendTopoInstanceFm(instances []map[string]interface{}, seen map[string]bo
 	return append(instances, inst)
 }
 
-
 func AppendTopoInstance(instances []map[string]interface{}, seen map[string]bool,
-	row map[string]interface{}, suffix, role string, uid string) []map[string]interface{} {
-
+	row map[string]interface{}, suffix, role string, uid string,
+) []map[string]interface{} {
 	// Build a unique key from (auto_service_id_suffix, observation_point, is_internet_suffix)
 	svcID := GetStrVal(row, "auto_service_id"+suffix)
 	svcName := GetStrVal(row, "auto_service"+suffix)
@@ -280,21 +279,20 @@ func AppendTopoInstance(instances []map[string]interface{}, seen map[string]bool
 	}
 	seen[key] = true
 
-
 	inst := map[string]interface{}{
-		"rs_set_id":        "R1",
-		"observation_point": obs,
+		"rs_set_id":               "R1",
+		"observation_point":       obs,
 		"Enum(observation_point)": row["Enum(observation_point)"],
-		"role":              role,
-		"uid":                 uid,
-		"_querier_region":   "本地",
-		"auto_service_id":   row["auto_service_id"+suffix],
-		"auto_service":      row["auto_service"+suffix],
-		"auto_service_type": row["auto_service_type"+suffix],
-		"is_internet":       row["is_internet"+suffix],
-		"node_type":         TopoNodeTypeFor(int(GetIntVal(row, "auto_service_type"+suffix))),
-		"icon_id":           TopoIconFor(int(GetIntVal(row, "auto_service_type"+suffix))),
-		"resource_l7_protocol": row["resource_l7_protocol" + suffix],
+		"role":                    role,
+		"uid":                     uid,
+		"_querier_region":         clickhouse.QuerierRegion,
+		"auto_service_id":         row["auto_service_id"+suffix],
+		"auto_service":            row["auto_service"+suffix],
+		"auto_service_type":       row["auto_service_type"+suffix],
+		"is_internet":             row["is_internet"+suffix],
+		"node_type":               TopoNodeTypeFor(int(GetIntVal(row, "auto_service_type"+suffix))),
+		"icon_id":                 TopoIconFor(int(GetIntVal(row, "auto_service_type"+suffix))),
+		"resource_l7_protocol":    row["resource_l7_protocol"+suffix],
 	}
 
 	// Copy metric fields from the row.
@@ -355,16 +353,16 @@ func AppendOrphanInstances(instances []map[string]interface{}, peers []map[strin
 			protoKey := "resource_l7_protocol" + suffix
 			proto := p[protoKey]
 			inst := map[string]interface{}{
-				"rs_set_id":           "R1",
-				"uid":                 uid,
-				"add_description":   "双端不在单端的补点",
-				"_querier_region":   "本地",
-				"node_type":           p[nodeKey],
-				"icon_id":             p[iconKey],
-				"auto_service_id":     p["auto_service_id"+suffix],
-				"auto_service":        svcName,
-				"auto_service_type":   p["auto_service_type"+suffix],
-				"is_internet":         0,
+				"rs_set_id":            "R1",
+				"uid":                  uid,
+				"add_description":      "双端不在单端的补点",
+				"_querier_region":      clickhouse.QuerierRegion,
+				"node_type":            p[nodeKey],
+				"icon_id":              p[iconKey],
+				"auto_service_id":      p["auto_service_id"+suffix],
+				"auto_service":         svcName,
+				"auto_service_type":    p["auto_service_type"+suffix],
+				"is_internet":          0,
 				"resource_l7_protocol": proto,
 			}
 			if v, ok := p[rateKey]; ok {
@@ -381,7 +379,6 @@ func AppendOrphanInstances(instances []map[string]interface{}, peers []map[strin
 	}
 	return instances
 }
-
 
 func BuildTopoUIDFromMap(m map[string]interface{}, suffix, iconKey, nodeKey, svcName string) string {
 	svcID := fmt.Sprintf("%v", m["auto_service_id"+suffix])
@@ -421,7 +418,10 @@ func BuildTopoUID(row map[string]interface{}, suffix, iconKey, nodeKey string) s
 }
 
 // getStrVal safely extracts a string value from a map.
-// topoNodeTypeFor maps auto_service_type to node_type string (matches cloud behavior).
+// topoNodeTypeFor maps auto_service_type to node_type string.
+// Ground truth: DeepFlow trident.proto AutoServiceType + zerotrace-server
+// tagrecorder RESOURCE_TYPE_TO_NODE_TYPE + api_cache. Keep in sync with
+// clickhouse.NodeTypeFor.
 
 func TopoNodeTypeFor(t int) string {
 	switch t {
@@ -429,17 +429,31 @@ func TopoNodeTypeFor(t int) string {
 		return "internet_ip"
 	case 1:
 		return "chost"
+	case 10:
+		return "pod"
 	case 11:
 		return "pod_service"
+	case 12:
+		return "redis"
+	case 13:
+		return "rds"
+	case 14:
+		return "pod_node"
 	case 15:
 		return "lb"
+	case 16:
+		return "natgw"
+	case 101:
+		return "pod_group"
+	case 102:
+		return "service"
 	case 103:
 		return "pod_cluster"
 	case 104:
 		return "biz_service"
 	case 120:
 		return "gprocess"
-	case 130, 133:
+	case 130, 131, 132, 133, 134, 135:
 		return "pod_group"
 	case 255:
 		return "ip"
@@ -475,35 +489,71 @@ func TopoIconFor(t int) int {
 	}
 }
 
-// getIntVal safely extracts an int value from a map (returns 0 if missing/nil).
-
+// GetIntVal extracts an int value from a map (canonical clickhouse.GetInt).
 func GetIntVal(m map[string]interface{}, key string) int {
-	if v, ok := m[key]; ok && v != nil {
-		switch n := v.(type) {
-		case float64:
-			return int(n)
-		case int64:
-			return int(n)
-		case uint8:
-			return int(n)
-		case uint64:
-			return int(n)
-		case int:
-			return n
-		}
-	}
-	return 0
+	return clickhouse.Get[int](m, key)
 }
 
-// getStrVal safely extracts a string value from a map.
-
+// GetStrVal extracts a string value from a map (canonical clickhouse.GetStr).
 func GetStrVal(m map[string]interface{}, key string) string {
-	if v, ok := m[key]; ok && v != nil {
-		if s, ok2 := v.(string); ok2 {
-			return s
-		}
-		return fmt.Sprintf("%v", v)
-	}
-	return ""
+	return clickhouse.GetStr(m, key)
 }
 
+// InjectAutoServiceTypeColumns adds auto_service_type columns to a Topo request
+// so that the real auto_service_type values are available for result processing.
+func InjectAutoServiceTypeColumns(req *query.QuerierListRequest) {
+	if len(req.Queries) == 0 {
+		return
+	}
+	q := &req.Queries[0]
+	if !strings.Contains(q.Select, "auto_service_type_0") {
+		q.Select += ", auto_service_type_0, auto_service_type_1"
+	}
+	if !strings.Contains(q.GroupBy, "auto_service_type_0") {
+		if q.GroupBy != "" {
+			q.GroupBy += ", auto_service_type_0, auto_service_type_1"
+		}
+	}
+	seen := map[string]bool{}
+	for _, t := range q.Tags {
+		seen[t] = true
+	}
+	if !seen["auto_service_type_0"] {
+		q.Tags = append(q.Tags, "auto_service_type_0")
+	}
+	if !seen["auto_service_type_1"] {
+		q.Tags = append(q.Tags, "auto_service_type_1")
+	}
+}
+
+// EmptyTopoResult returns an empty topo response.
+func EmptyTopoResult() map[string]interface{} {
+	return map[string]interface{}{"instance_data": []interface{}{}, "peers_data": []interface{}{}}
+}
+
+// BuildFlowLogTopoResponse processes a Top query result into the Topo
+// instance_data + peers_data response format expected by the frontend.
+func BuildFlowLogTopoResponse(result *query.Result) map[string]interface{} {
+	peers := result.Data
+	seen := map[string]bool{}
+	var instances []map[string]interface{}
+	for _, row := range peers {
+		for _, suf := range []string{"_0", "_1"} {
+			ast := GetIntVal(row, "auto_service_type"+suf)
+			if suf == "_0" {
+				row["client_node_type"] = TopoNodeTypeFor(ast)
+				row["client_icon_id"] = TopoIconFor(ast)
+			} else {
+				row["server_node_type"] = TopoNodeTypeFor(ast)
+				row["server_icon_id"] = TopoIconFor(ast)
+			}
+		}
+		uid0 := BuildTopoUID(row, "_0", "client_icon_id", "client_node_type")
+		uid1 := BuildTopoUID(row, "_1", "server_icon_id", "server_node_type")
+		row["uid_0"] = uid0
+		row["uid_1"] = uid1
+		instances = AppendTopoInstance(instances, seen, row, "_0", "c", uid0)
+		instances = AppendTopoInstance(instances, seen, row, "_1", "s", uid1)
+	}
+	return map[string]interface{}{"instance_data": instances, "peers_data": peers}
+}

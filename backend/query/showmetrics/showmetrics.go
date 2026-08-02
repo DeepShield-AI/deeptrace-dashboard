@@ -5,13 +5,149 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"time"
+
+	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/client"
+	"deeptrace-backend/logging"
 )
+
+// QueryMetricsMerged returns the merged ShowMetrics list for a request.
+// Merges deepflow-server (ZT) metrics with ClickHouse column metrics (dedup by name),
+// falling back to a hardcoded minimal list when both sources are unavailable.
+// language ("zh" / "en") picks the primary display fields, matching the cloud
+// contract where X-Language: zh swaps display_name/description/unit to the
+// Chinese variants.
+func QueryMetricsMerged(zt *client.ZerotraceService, bodyStr, language string) []interface{} {
+	db, tbl := "flow_log", "l7_flow_log"
+	var req struct {
+		Database string `json:"DATABASE"`
+		Table    string `json:"TABLE"`
+	}
+	if json.Unmarshal([]byte(bodyStr), &req) == nil {
+		if req.Database != "" {
+			db = req.Database
+		}
+		if req.Table != "" {
+			tbl = req.Table
+		}
+	}
+
+	// Collect metrics from multiple sources and merge for best coverage.
+	var mergedMetrics []interface{}
+	seen := map[string]bool{}
+
+	// 1. Try deepflow-server (ZT) — returns virtual tags and metrics.
+	if zt != nil && zt.Available() {
+		for _, mm := range queryMetricsZT(zt, bodyStr, language) {
+			key := fmt.Sprintf("%s.%s.%s", db, tbl, mm["name"])
+			if !seen[key] {
+				seen[key] = true
+				mergedMetrics = append(mergedMetrics, mm)
+			}
+		}
+	}
+
+	// 2. Try ClickHouse HTTP for column metadata (fills gaps ZT misses).
+	if chMetrics := QueryShowMetricsCH(db, tbl); chMetrics != nil {
+		for _, m := range chMetrics {
+			if mm, ok := m.(map[string]interface{}); ok {
+				key := fmt.Sprintf("%s.%s.%s", db, tbl, mm["name"])
+				if !seen[key] {
+					seen[key] = true
+					mergedMetrics = append(mergedMetrics, mm)
+				}
+			}
+		}
+	}
+
+	if len(mergedMetrics) > 0 {
+		return mergedMetrics
+	}
+
+	// 3. Fallback: hardcoded minimal list.
+	return FallbackShowMetrics(tbl)
+}
+
+// queryMetricsZT queries deepflow-server for metric metadata.
+// Returns the converted row maps (nil if unavailable).
+func queryMetricsZT(zt *client.ZerotraceService, bodyStr, language string) []map[string]interface{} {
+	var req struct {
+		Database string `json:"DATABASE"`
+		Table    string `json:"TABLE"`
+	}
+	if err := json.Unmarshal([]byte(bodyStr), &req); err != nil {
+		return nil
+	}
+
+	db := req.Database
+	if db == "" {
+		db = "flow_log"
+	}
+	tbl := req.Table
+	if tbl == "" {
+		tbl = "l7_flow_log"
+	}
+
+	// No backticks around the table name: the deepflow-server parser returns
+	// an incomplete list (missing all virtual/aggregate metrics such as
+	// request/response/rrt) and a backtick-quoted table field when the table
+	// is backtick-quoted. Bare table names return the full 83-entry list.
+	sql := fmt.Sprintf("SHOW metrics FROM %s", tbl)
+
+	rows, err := zt.QueryRaw(db, sql)
+	if err != nil {
+		logging.Errorf("ZT ShowMetrics error: %v (db=%s tbl=%s)", err, db, tbl)
+		return nil
+	}
+	if len(rows.Values) == 0 {
+		return []map[string]interface{}{}
+	}
+
+	// Convert columns+values to []map[string]interface{}.
+	data := make([]map[string]interface{}, 0, len(rows.Values))
+	for _, row := range rows.Values {
+		r := make(map[string]interface{}, len(rows.Columns)+1)
+		for i, col := range rows.Columns {
+			if i >= len(row) {
+				continue
+			}
+			val := row[i]
+			// Convert json.Number to float64 for JSON serialization compatibility.
+			if num, ok := val.(json.Number); ok {
+				if f, err := num.Float64(); err == nil {
+					val = f
+				} else {
+					val = num.String()
+				}
+			}
+			r[col] = val
+		}
+		// Language switch: the cloud (X-Language: zh) reports the primary
+		// display_name/description/unit fields in the request language,
+		// while deepflow-server returns English primaries + zh/en variants.
+		if language == "zh" {
+			if zh, ok := r["display_name_zh"].(string); ok && zh != "" {
+				r["display_name"] = zh
+			}
+			if zh, ok := r["description_zh"].(string); ok && zh != "" {
+				r["description"] = zh
+			}
+			if zh, ok := r["unit_zh"].(string); ok && zh != "" {
+				r["unit"] = zh
+			}
+		} else if en, ok := r["display_name_en"].(string); ok && en != "" {
+			r["display_name"] = en
+		}
+		data = append(data, r)
+	}
+
+	return data
+}
 
 var chHost = GetCHHTTPHost()
 
@@ -32,7 +168,7 @@ func HTTPQuery(query string) ([]map[string]interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	reqURL := chHost + "/?query=" + url.QueryEscape(query + " FORMAT JSON")
+	reqURL := chHost + "/?query=" + url.QueryEscape(query+" FORMAT JSON")
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -80,7 +216,7 @@ func QueryShowMetricsCH(database, table string) []interface{} {
 		}
 	}
 	if lastErr != nil {
-		log.Printf("⚠️  ShowMetrics CH query failed: %v", lastErr)
+		logging.Errorf("ShowMetrics CH query failed: %v", lastErr)
 		return nil
 	}
 	if len(rows) == 0 {
@@ -95,9 +231,9 @@ func QueryShowMetricsCH(database, table string) []interface{} {
 	cols := make([]chCol, 0, len(rows))
 	for _, row := range rows {
 		cols = append(cols, chCol{
-			Name:    GetStr(row, "name"),
-			Type:    GetStr(row, "type"),
-			Comment: GetStr(row, "comment"),
+			Name:    clickhouse.Get[string](row, "name"),
+			Type:    clickhouse.Get[string](row, "type"),
+			Comment: clickhouse.Get[string](row, "comment"),
 		})
 	}
 
@@ -113,22 +249,22 @@ func QueryShowMetricsCH(database, table string) []interface{} {
 		seen[key] = true
 
 		entry := map[string]interface{}{
-			"name":             name,
-			"is_agg":           isAgg,
-			"display_name":     displayName,
-			"display_name_zh":  displayName,
-			"display_name_en":  displayName,
-			"unit":             unit,
-			"unit_zh":          unit,
-			"unit_en":          unit,
-			"type":             typ,
-			"category":         category,
-			"operators":        []string{">=", "<=", ">", "<", "="},
-			"permissions":      []bool{true, true, true},
-			"table":            table,
-			"description":      description,
-			"description_zh":   description,
-			"description_en":   description,
+			"name":            name,
+			"is_agg":          isAgg,
+			"display_name":    displayName,
+			"display_name_zh": displayName,
+			"display_name_en": displayName,
+			"unit":            unit,
+			"unit_zh":         unit,
+			"unit_en":         unit,
+			"type":            typ,
+			"category":        category,
+			"operators":       []string{">=", "<=", ">", "<", "="},
+			"permissions":     []bool{true, true, true},
+			"table":           table,
+			"description":     description,
+			"description_zh":  description,
+			"description_en":  description,
 		}
 		metrics = append(metrics, entry)
 	}
@@ -262,6 +398,26 @@ func QueryShowMetricsCH(database, table string) []interface{} {
 			continue
 		}
 
+		// Skip bare physical ID columns (az_id/region_id/auto_service_id/...).
+		// The cloud lists only virtual tags here — these would show up as
+		// metrics the cloud doesn't have. (_id_0/_id_1 are handled above.)
+		if strings.HasSuffix(name, "_id") {
+			continue
+		}
+
+		// Skip bare ip4/ip6 columns (flow_metrics tables carry unsuffixed
+		// copies; the cloud does not list them as metrics).
+		if name == "ip4" || name == "ip6" {
+			continue
+		}
+
+		// direction_score/log_count/session_length are flow_log-only in the
+		// cloud contract, but flow_metrics tables carry a direction_score
+		// physical column — exclude it outside flow_log.
+		if database != "flow_log" && !strings.HasPrefix(table, "flow_log") && name == "direction_score" {
+			continue
+		}
+
 		// For naming convention: if column ends with _id_0 or _id_1, generate tag variant.
 		// E.g., auto_instance_id_0 → auto_instance_0 (客户端 实例).
 		if strings.HasSuffix(name, "_id_0") || strings.HasSuffix(name, "_id_1") {
@@ -287,35 +443,41 @@ func QueryShowMetricsCH(database, table string) []interface{} {
 	}
 
 	// Add computed/core metrics that are not actual columns.
+	// flowLogOnly: the cloud only reports these for flow_log tables.
 	coreMetrics := []struct {
 		Name       string
 		Display    string
 		Category   string
 		MetricType int
 		Desc       string
+		FlowLog    bool
 	}{
-		{"request", "请求", "Throughput", 1, "请求总数"},
-		{"response", "响应", "Throughput", 1, "响应总数"},
-		{"error", "异常", "Error", 1, "客户端异常 + 服务端异常"},
-		{"client_error", "客户端异常", "Error", 1, "客户端异常数"},
-		{"server_error", "服务端异常", "Error", 1, "服务端异常数"},
-		{"timeout", "超时", "Error", 1, "超时数"},
-		{"error_ratio", "异常比例", "Error", 4, "异常 / 响应"},
-		{"client_error_ratio", "客户端异常比例", "Error", 4, "客户端异常 / 响应"},
-		{"server_error_ratio", "服务端异常比例", "Error", 4, "服务端异常 / 响应"},
-		{"timeout_ratio", "超时比例", "Error", 4, "超时 / 请求"},
-		{"response_ratio", "响应比例", "Throughput", 4, "响应 / 请求"},
-		{"success_ratio", "正常比例", "Throughput", 4, "1 - 异常 / 响应"},
-		{"row", "行数", "Other", 8, "数据行数"},
-		{"direction_score", "方向得分", "Throughput", 9, ""},
-		{"log_count", "日志总量", "Throughput", 1, "日志总量"},
-		{"session_length", "会话长度", "Throughput", 1, "请求长度 + 响应长度"},
+		{"request", "请求", "Throughput", 1, "请求总数", false},
+		{"response", "响应", "Throughput", 1, "响应总数", false},
+		{"error", "异常", "Error", 1, "客户端异常 + 服务端异常", false},
+		{"client_error", "客户端异常", "Error", 1, "客户端异常数", false},
+		{"server_error", "服务端异常", "Error", 1, "服务端异常数", false},
+		{"timeout", "超时", "Error", 1, "超时数", false},
+		{"error_ratio", "异常比例", "Error", 4, "异常 / 响应", false},
+		{"client_error_ratio", "客户端异常比例", "Error", 4, "客户端异常 / 响应", false},
+		{"server_error_ratio", "服务端异常比例", "Error", 4, "服务端异常 / 响应", false},
+		{"timeout_ratio", "超时比例", "Error", 4, "超时 / 请求", false},
+		{"response_ratio", "响应比例", "Throughput", 4, "响应 / 请求", false},
+		{"success_ratio", "正常比例", "Throughput", 4, "1 - 异常 / 响应", false},
+		{"row", "行数", "Other", 8, "数据行数", false},
+		{"direction_score", "方向得分", "Throughput", 9, "", true},
+		{"log_count", "日志总量", "Throughput", 1, "日志总量", true},
+		{"session_length", "会话长度", "Throughput", 1, "请求长度 + 响应长度", true},
 	}
+	isFlowLogTable := database == "flow_log" || strings.HasPrefix(table, "flow_log")
 	for _, m := range coreMetrics {
+		if m.FlowLog && !isFlowLogTable {
+			continue
+		}
 		addMetric(m.Name, m.Display, "", true, m.MetricType, m.Category, m.Desc)
 	}
 
-	log.Printf("ShowMetrics: queryShowMetricsCH called for db=%s tbl=%s", database, table)
+	logging.Debugf("ShowMetrics: queryShowMetricsCH called for db=%s tbl=%s", database, table)
 	// Add virtual metrics (computed by ZT, not directly in CH).
 	virtualMetrics := []struct {
 		Name    string
@@ -327,18 +489,18 @@ func QueryShowMetricsCH(database, table string) []interface{} {
 		{"rrt_max", "最大时延", "采集周期内所有应用时延的最大值", 3},
 	}
 	for _, vm := range virtualMetrics {
-		log.Printf("ShowMetrics: adding virtual metric %s", vm.Name)
+		logging.Debugf("ShowMetrics: adding virtual metric %s", vm.Name)
 		addMetric(vm.Name, vm.Display, "us", true, vm.MType, "Delay", vm.Desc)
 	}
 
 	// Add virtual/computed tags that aren't physical columns but are used by Topo/Top queries.
+	// (is_internet is intentionally absent — the cloud ShowMetrics does not list it.)
 	virtualTags := []struct {
 		Name    string
 		Display string
 		Desc    string
 	}{
 		{"role", "角色", "客户端/服务端角色"},
-		{"is_internet", "网络类型", "内网/公网网络类型"},
 	}
 	for _, vt := range virtualTags {
 		addMetric(vt.Name, vt.Display, "", false, 6, "Tag", vt.Desc)
@@ -364,14 +526,4 @@ func FallbackShowMetrics(table string) []interface{} {
 		result[i] = b
 	}
 	return result
-}
-
-// getStr safely extracts a string from a map.
-func GetStr(m map[string]interface{}, key string) string {
-	if v, ok := m[key]; ok && v != nil {
-		if s, ok2 := v.(string); ok2 {
-			return s
-		}
-	}
-	return ""
 }

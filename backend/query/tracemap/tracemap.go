@@ -1,15 +1,15 @@
 package tracemap
 
 import (
-	"deeptrace-backend/query"
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"time"
 
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/logging"
+	"deeptrace-backend/query"
 )
 
 type endpointStat struct {
@@ -21,24 +21,26 @@ type endpointStat struct {
 }
 
 // tmKey and tmAgg are used by QueryTraceMap for service-level aggregation.
-type tmKey struct{ id, typ float64 }
-type tmAgg struct {
-	name            string
-	parentIDs       map[tmKey]bool
-	childIDs        map[tmKey]bool
-	total           float64
-	responseTotal   float64
-	durationSum     float64
-	successCount    float64
-	serverErrCount  float64
-	signalSource    float64
-	obsPoint        string
-	ip              string
-	serverEndpoints []string // endpoints this service serves (as server, endpoints_1)
-	clientEndpoints []string // endpoints this service calls (as client, endpoints_0)
-	gprocessIDs     map[string]interface{}
-	epStats         map[string]endpointStat
-}
+type (
+	tmKey struct{ id, typ float64 }
+	tmAgg struct {
+		name            string
+		parentIDs       map[tmKey]bool
+		childIDs        map[tmKey]bool
+		total           float64
+		responseTotal   float64
+		durationSum     float64
+		successCount    float64
+		serverErrCount  float64
+		signalSource    float64
+		obsPoint        string
+		ip              string
+		serverEndpoints []string // endpoints this service serves (as server, endpoints_1)
+		clientEndpoints []string // endpoints this service calls (as client, endpoints_0)
+		gprocessIDs     map[string]interface{}
+		epStats         map[string]endpointStat
+	}
+)
 
 // ---------------------------------------------------------------------------
 // QueryTraceMap — returns TraceMap node data from ClickHouse
@@ -59,12 +61,12 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 
 	// Query unique trace counts (total and calculated/completed).
 	traceCountSQL := fmt.Sprintf(
-		"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log WHERE %s", whereSQL)
+		"SELECT uniq(trace_id) AS total_traces, uniqIf(trace_id, response_duration > 0) AS calc_traces FROM flow_log.l7_flow_log_local WHERE %s", whereSQL)
 	var totalTraceCount, calcTraceCount int64
 	if rows2, err2 := ch.Query(qCtx, traceCountSQL); err2 == nil {
 		if td, e2 := clickhouse.ScanRows(rows2); e2 == nil && len(td) > 0 {
-			totalTraceCount = int64(clickhouse.GetF64(td[0], "total_traces"))
-			calcTraceCount = int64(clickhouse.GetF64(td[0], "calc_traces"))
+			totalTraceCount = int64(clickhouse.Get[float64](td[0], "total_traces"))
+			calcTraceCount = int64(clickhouse.Get[float64](td[0], "calc_traces"))
 		}
 		rows2.Close()
 	}
@@ -95,14 +97,14 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 			CountIf(response_status = 0) AS response_success_count,
 			CountIf(response_status = 3 OR response_status = 5) AS response_status_server_error_count,
 			Avg(response_duration) AS avg_response_duration
-		FROM flow_log.l7_flow_log
+		FROM flow_log.l7_flow_log_local
 		WHERE %s
 		GROUP BY
 			auto_service_id_0, auto_service_type_0,
 			auto_service_id_1, auto_service_type_1
 		ORDER BY total DESC`, whereSQL)
 
-	log.Printf("CH TraceMap: %s", sqlStr[:min(len(sqlStr), 300)])
+	logging.Debugf("CH TraceMap: %s", sqlStr[:min(len(sqlStr), 300)])
 
 	rows, err := ch.Query(qCtx, sqlStr)
 	if err != nil {
@@ -132,7 +134,7 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 			any(response_code) AS response_code,
 			any(response_exception) AS response_exception,
 			any(response_status) AS response_status
-		FROM flow_log.l7_flow_log
+		FROM flow_log.l7_flow_log_local
 		WHERE %s
 		GROUP BY
 			auto_service_id_0, auto_service_type_0,
@@ -140,12 +142,13 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 			request_resource
 		ORDER BY ep_total DESC`, whereSQL)
 
-	log.Printf("CH TraceMap endpoints: %s", endpointSQL[:min(len(endpointSQL), 300)])
+	logging.Debugf("CH TraceMap endpoints: %s", endpointSQL[:min(len(endpointSQL), 300)])
 
 	epRows, epErr := ch.Query(qCtx, endpointSQL)
 	var endpointData []map[string]interface{}
 	if epErr == nil {
-		endpointData, epErr = clickhouse.ScanRows(epRows)
+		// Scan error is non-fatal: endpoint stats are best-effort enrichment.
+		endpointData, _ = clickhouse.ScanRows(epRows)
 		if epRows != nil {
 			epRows.Close()
 		}
@@ -163,19 +166,19 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 	epByPair := map[string][]endpointInfo{}
 	for _, epRow := range endpointData {
 		key := fmt.Sprintf("%v|%v|%v|%v",
-			clickhouse.GetF64(epRow, "auto_service_id_0"), clickhouse.GetF64(epRow, "auto_service_type_0"),
-			clickhouse.GetF64(epRow, "auto_service_id_1"), clickhouse.GetF64(epRow, "auto_service_type_1"))
+			clickhouse.Get[float64](epRow, "auto_service_id_0"), clickhouse.Get[float64](epRow, "auto_service_type_0"),
+			clickhouse.Get[float64](epRow, "auto_service_id_1"), clickhouse.Get[float64](epRow, "auto_service_type_1"))
 		epName := clickhouse.GetStr(epRow, "request_resource")
 		if epName == "" {
 			continue
 		}
 		epByPair[key] = append(epByPair[key], endpointInfo{
 			name:              epName,
-			total:             clickhouse.GetF64(epRow, "ep_total"),
+			total:             clickhouse.Get[float64](epRow, "ep_total"),
 			bizCode:           clickhouse.GetStr(epRow, "biz_code"),
-			responseCode:      clickhouse.GetF64(epRow, "response_code"),
+			responseCode:      clickhouse.Get[float64](epRow, "response_code"),
 			responseException: clickhouse.GetStr(epRow, "response_exception"),
-			responseStatus:    clickhouse.GetF64(epRow, "response_status"),
+			responseStatus:    clickhouse.Get[float64](epRow, "response_status"),
 		})
 	}
 
@@ -186,20 +189,20 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 	svcMap := map[tmKey]*tmAgg{}
 
 	for _, row := range allData {
-		sk0 := tmKey{clickhouse.GetF64(row, "auto_service_id_0"), clickhouse.GetF64(row, "auto_service_type_0")}
-		sk1 := tmKey{clickhouse.GetF64(row, "auto_service_id_1"), clickhouse.GetF64(row, "auto_service_type_1")}
+		sk0 := tmKey{clickhouse.Get[float64](row, "auto_service_id_0"), clickhouse.Get[float64](row, "auto_service_type_0")}
+		sk1 := tmKey{clickhouse.Get[float64](row, "auto_service_id_1"), clickhouse.Get[float64](row, "auto_service_type_1")}
 
 		if sk0 == sk1 {
 			continue // self-loop: same service, no valid edge
 		}
-		total := clickhouse.GetF64(row, "total")
-		rTotal := clickhouse.GetF64(row, "response_total")
-		durSum := clickhouse.GetF64(row, "response_duration_sum")
-		succ := clickhouse.GetF64(row, "response_success_count")
-		errCnt := clickhouse.GetF64(row, "response_status_server_error_count")
+		total := clickhouse.Get[float64](row, "total")
+		rTotal := clickhouse.Get[float64](row, "response_total")
+		durSum := clickhouse.Get[float64](row, "response_duration_sum")
+		succ := clickhouse.Get[float64](row, "response_success_count")
+		errCnt := clickhouse.Get[float64](row, "response_status_server_error_count")
 
 		// Endpoints from this row (for the client service, these are endpoints_1 in parent info)
-		endpoints := strList(clickhouse.GetArr(row, "endpoints_arr"))
+		endpoints := strList(clickhouse.Get[[]interface{}](row, "endpoints_arr"))
 
 		svcName0 := clickhouse.GetStr(row, "auto_service_name_0")
 		if svcName0 == "" {
@@ -209,13 +212,13 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		// Metrics: only tracked on server side (incoming edges). Client side tracks
 		// childIDs for BFS leveling and endpoint/gprocess collection only.
 		agg0.childIDs[sk1] = true
-		agg0.signalSource = clickhouse.GetF64(row, "signal_source")
+		agg0.signalSource = clickhouse.Get[float64](row, "signal_source")
 		agg0.obsPoint = clickhouse.GetStr(row, "observation_point")
 		if agg0.ip == "" {
 			agg0.ip = clickhouse.GetStr(row, "ip4_0")
 		}
 		// Collect gprocess IDs for client side (skip zero/empty IDs)
-		for _, gpid := range strList(clickhouse.GetArr(row, "gprocess_ids_0_arr")) {
+		for _, gpid := range strList(clickhouse.Get[[]interface{}](row, "gprocess_ids_0_arr")) {
 			if gpid != "" && gpid != "0" {
 				agg0.gprocessIDs[gpid] = struct{}{}
 			}
@@ -232,13 +235,13 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		agg1.successCount += succ
 		agg1.serverErrCount += errCnt
 		agg1.parentIDs[sk0] = true
-		agg1.signalSource = clickhouse.GetF64(row, "signal_source")
+		agg1.signalSource = clickhouse.Get[float64](row, "signal_source")
 		agg1.obsPoint = clickhouse.GetStr(row, "observation_point")
 		if agg1.ip == "" {
 			agg1.ip = clickhouse.GetStr(row, "ip4_1")
 		}
 		// Collect gprocess IDs for server side (skip zero/empty IDs)
-		for _, gpid := range strList(clickhouse.GetArr(row, "gprocess_ids_1_arr")) {
+		for _, gpid := range strList(clickhouse.Get[[]interface{}](row, "gprocess_ids_1_arr")) {
 			if gpid != "" && gpid != "0" {
 				agg1.gprocessIDs[gpid] = struct{}{}
 			}
@@ -250,8 +253,8 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 
 		// Collect per-endpoint stats from Query B data (for both client and server side)
 		pairKey := fmt.Sprintf("%v|%v|%v|%v",
-			clickhouse.GetF64(row, "auto_service_id_0"), clickhouse.GetF64(row, "auto_service_type_0"),
-			clickhouse.GetF64(row, "auto_service_id_1"), clickhouse.GetF64(row, "auto_service_type_1"))
+			clickhouse.Get[float64](row, "auto_service_id_0"), clickhouse.Get[float64](row, "auto_service_type_0"),
+			clickhouse.Get[float64](row, "auto_service_id_1"), clickhouse.Get[float64](row, "auto_service_type_1"))
 		for _, epInfo := range epByPair[pairKey] {
 			if epInfo.name != "" {
 				// Server side: per-endpoint stats for what this service serves
@@ -476,7 +479,7 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 			"service_uid":        serviceUID,
 			"auto_service":       agg.name,
 			// (auto_service kept as-is; IP fallback is done in cloud but requires IP per edge)
-			"_querier_region":   "本地",
+			"_querier_region":   clickhouse.QuerierRegion,
 			"observation_point": agg.obsPoint,
 			"parent_node_infos": []interface{}{},
 
@@ -507,12 +510,9 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		if m, ok := node["gprocess_ids"].(map[string]interface{}); ok && len(m) == 0 {
 			delete(node, "gprocess_ids")
 		}
-		if m, ok := node["trace_ids"].(map[string]interface{}); ok && len(m) == 0 {
-			delete(node, "trace_ids")
-		}
-		if m, ok := node["abnormal_trace_ids"].(map[string]interface{}); ok && len(m) == 0 {
-			delete(node, "abnormal_trace_ids")
-		}
+		// NOTE: trace_ids / abnormal_trace_ids must NOT be deleted when empty —
+		// api_cache shows nodes carry them as empty dicts, and Step 4 populates
+		// them from edge-level trace_ids_arr (write-before-init below).
 		// When no response data (total=0), set ratio/duration fields to nil (cloud behavior).
 		if rTotal == 0 {
 			node["avg_response_duration"] = nil
@@ -535,8 +535,8 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 	// Step 4: Build parent_node_infos edges (cloud-compatible format).
 	// -----------------------------------------------------------------------
 	for _, row := range allData {
-		sk0 := tmKey{clickhouse.GetF64(row, "auto_service_id_0"), clickhouse.GetF64(row, "auto_service_type_0")}
-		sk1 := tmKey{clickhouse.GetF64(row, "auto_service_id_1"), clickhouse.GetF64(row, "auto_service_type_1")}
+		sk0 := tmKey{clickhouse.Get[float64](row, "auto_service_id_0"), clickhouse.Get[float64](row, "auto_service_type_0")}
+		sk1 := tmKey{clickhouse.Get[float64](row, "auto_service_id_1"), clickhouse.Get[float64](row, "auto_service_type_1")}
 		if sk0 == sk1 {
 			continue
 		}
@@ -550,11 +550,11 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		if sk0 == sk1 {
 			continue // self-loop: same service, no valid edge
 		}
-		total := clickhouse.GetF64(row, "total")
-		rTotal := clickhouse.GetF64(row, "response_total")
-		durSum := clickhouse.GetF64(row, "response_duration_sum")
-		succ := clickhouse.GetF64(row, "response_success_count")
-		errCnt := clickhouse.GetF64(row, "response_status_server_error_count")
+		total := clickhouse.Get[float64](row, "total")
+		rTotal := clickhouse.Get[float64](row, "response_total")
+		durSum := clickhouse.Get[float64](row, "response_duration_sum")
+		succ := clickhouse.Get[float64](row, "response_success_count")
+		errCnt := clickhouse.Get[float64](row, "response_status_server_error_count")
 
 		avgDur := float64(0)
 		if rTotal > 0 {
@@ -567,8 +567,8 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 
 		// Endpoints from this service pair (from Query B endpoint data)
 		pairKey := fmt.Sprintf("%v|%v|%v|%v",
-			clickhouse.GetF64(row, "auto_service_id_0"), clickhouse.GetF64(row, "auto_service_type_0"),
-			clickhouse.GetF64(row, "auto_service_id_1"), clickhouse.GetF64(row, "auto_service_type_1"))
+			clickhouse.Get[float64](row, "auto_service_id_0"), clickhouse.Get[float64](row, "auto_service_type_0"),
+			clickhouse.Get[float64](row, "auto_service_id_1"), clickhouse.Get[float64](row, "auto_service_type_1"))
 		epInfos := epByPair[pairKey]
 		// Limit to top 5 by total for span_info (matching cloud behavior).
 		if len(epInfos) > 5 {
@@ -593,7 +593,7 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		// Keep nil as nil for JSON null (matching cloud behavior).
 
 		// Trace IDs for this edge (from groupArray)
-		traceIDStrs := strList(clickhouse.GetArr(row, "trace_ids_arr"))
+		traceIDStrs := strList(clickhouse.Get[[]interface{}](row, "trace_ids_arr"))
 		var abnormalTraceIDs []string
 		if errCnt > 0 {
 			for _, tid := range traceIDStrs {
@@ -617,7 +617,12 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		}
 
 		// Add trace IDs to both client and server nodes (node level uses dict).
+		// Init the key first: node construction keeps empty dicts now, but be
+		// defensive in case a node was built before the map was set.
 		for _, idx := range []int{idx0, idx1} {
+			if _, ok := nodes[idx]["trace_ids"]; !ok {
+				nodes[idx]["trace_ids"] = map[string]interface{}{}
+			}
 			for _, tid := range traceIDsList {
 				if existing, ok := nodes[idx]["trace_ids"].(map[string]interface{}); ok {
 					existing[tid.(string)] = map[string]interface{}{}
@@ -626,6 +631,9 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		}
 		// Add abnormal trace IDs to both client and server nodes.
 		for _, idx := range []int{idx0, idx1} {
+			if _, ok := nodes[idx]["abnormal_trace_ids"]; !ok {
+				nodes[idx]["abnormal_trace_ids"] = map[string]interface{}{}
+			}
 			for _, tid := range abnormalIDsList {
 				if existing, ok := nodes[idx]["abnormal_trace_ids"].(map[string]interface{}); ok {
 					existing[tid.(string)] = float64(1)
@@ -658,13 +666,13 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 			"avg_success_ratio":                  successRatio,
 			"uniq_parent_span_infos": []interface{}{
 				map[string]interface{}{
-					"signal_source":               clickhouse.GetF64(row, "signal_source"),
-					"auto_service_type_0":         clickhouse.GetF64(row, "auto_service_type_0"),
-					"auto_service_type_1":         clickhouse.GetF64(row, "auto_service_type_1"),
-					"auto_service_id_0":           clickhouse.GetF64(row, "auto_service_id_0"),
-					"auto_service_id_1":           clickhouse.GetF64(row, "auto_service_id_1"),
-					"client_icon_id":              clickhouse.IconFor(int(clickhouse.GetF64(row, "auto_service_type_0"))),
-					"server_icon_id":              clickhouse.IconFor(int(clickhouse.GetF64(row, "auto_service_type_1"))),
+					"signal_source":               clickhouse.Get[float64](row, "signal_source"),
+					"auto_service_type_0":         clickhouse.Get[float64](row, "auto_service_type_0"),
+					"auto_service_type_1":         clickhouse.Get[float64](row, "auto_service_type_1"),
+					"auto_service_id_0":           clickhouse.Get[float64](row, "auto_service_id_0"),
+					"auto_service_id_1":           clickhouse.Get[float64](row, "auto_service_id_1"),
+					"client_icon_id":              clickhouse.IconFor(int(clickhouse.Get[float64](row, "auto_service_type_0"))),
+					"server_icon_id":              clickhouse.IconFor(int(clickhouse.Get[float64](row, "auto_service_type_1"))),
 					"observation_point":           obsPt,
 					"ip_0":                        clickhouse.GetStr(row, "ip4_0"),
 					"ip_1":                        clickhouse.GetStr(row, "ip4_1"),
@@ -672,9 +680,9 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 					"app_service_1":               clickhouse.GetStr(row, "auto_service_name_1"),
 					"auto_service_0":              clickhouse.GetStr(row, "auto_service_name_0"),
 					"auto_service_1":              clickhouse.GetStr(row, "auto_service_name_1"),
-					"client_node_type":            clickhouse.NodeTypeFor(int(clickhouse.GetF64(row, "auto_service_type_0"))),
-					"server_node_type":            clickhouse.NodeTypeFor(int(clickhouse.GetF64(row, "auto_service_type_1"))),
-					"_querier_region":             "本地",
+					"client_node_type":            clickhouse.NodeTypeFor(int(clickhouse.Get[float64](row, "auto_service_type_0"))),
+					"server_node_type":            clickhouse.NodeTypeFor(int(clickhouse.Get[float64](row, "auto_service_type_1"))),
+					"_querier_region":             clickhouse.QuerierRegion,
 					"endpoints":                   endpointsList,
 					"endpoint_stats":              endpointStats,
 					"trace_ids":                   traceIDsList,
@@ -693,7 +701,6 @@ func QueryTraceMap(ch *clickhouse.CHService, ctx context.Context, timeStart, tim
 		CalculatedTraces: int(calcTraceCount),
 	}, nil
 }
-
 
 // strList converts []interface{} of strings to []string for easier processing.
 
@@ -750,10 +757,6 @@ func ConvertHistory(hist []map[string]interface{}, metrics []clickhouse.MetricEx
 		result = append(result, entry)
 	}
 	return result
-}
-
-func quoteCH(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "\\'") + "'"
 }
 
 // fillNullHistory fills gaps in time-series history data with null entries.

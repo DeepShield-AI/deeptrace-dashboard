@@ -2,7 +2,6 @@ package query
 
 import (
 	"context"
-	"fmt"
 	"strings"
 )
 
@@ -10,7 +9,9 @@ import (
 // Normal frontend requests use the zero value and retain the configured chain.
 type SourcePolicy struct {
 	ForcedSource string
-	Strict       bool
+	// NoFallback disables the cache/fallback layer: a forced source that
+	// cannot serve the request must fail the request instead.
+	NoFallback bool
 }
 
 type sourcePolicyContextKey struct{}
@@ -41,8 +42,6 @@ func NormalizeSourceName(name string) string {
 		return "clickhouse"
 	case "cache", "api_cache":
 		return "cache"
-	case "mock":
-		return "mock"
 	default:
 		return strings.ToLower(strings.TrimSpace(name))
 	}
@@ -51,17 +50,9 @@ func NormalizeSourceName(name string) string {
 // IsKnownSource reports whether a source can be requested by verification tools.
 func IsKnownSource(name string) bool {
 	switch NormalizeSourceName(name) {
-	case "zerotrace", "clickhouse", "cache", "mock":
+	case "zerotrace", "clickhouse", "cache":
 		return true
 	default:
 		return false
 	}
-}
-
-func sourceMatches(requested, actual string) bool {
-	return NormalizeSourceName(requested) == NormalizeSourceName(actual)
-}
-
-func forcedSourceError(source, reason string) error {
-	return fmt.Errorf("forced source %q %s", NormalizeSourceName(source), reason)
 }

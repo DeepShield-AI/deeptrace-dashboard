@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"deeptrace-backend/clickhouse"
 	"deeptrace-backend/client"
 )
 
@@ -56,7 +57,7 @@ func BuildData(rows *client.QueryResult, region string) []map[string]interface{}
 		if region != "" {
 			r["_querier_region"] = region
 		} else if _, has := r["_querier_region"]; !has {
-			r["_querier_region"] = "本地"
+			r["_querier_region"] = clickhouse.QuerierRegion
 		}
 
 		data = append(data, r)

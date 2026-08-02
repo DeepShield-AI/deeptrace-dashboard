@@ -2,20 +2,22 @@ package top
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"deeptrace-backend/logging"
 	"deeptrace-backend/query"
 
 	"deeptrace-backend/query/tracemap"
-	"fmt"
-	"log"
-	"strings"
-	"time"
 
 	"deeptrace-backend/clickhouse"
 )
 
-func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.QuerierRequest) (*query.QueryTopResult, error) {
-	db := req.Database
-	table := req.Table
+func QueryTop[T clickhouse.SqlRequest](ch clickhouse.Querier, ctx context.Context, req T) (*query.QueryTopResult, error) {
+	db := req.GetDatabase()
+	table := req.GetTable()
 	if db == "" {
 		db = "flow_log"
 	}
@@ -24,10 +26,16 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 	}
 	resolvedTable := table
 	if !strings.Contains(table, ".") && db == "flow_metrics" {
-		if req.DataSource != "" {
-			resolvedTable = table + "." + req.DataSource
+		if req.GetDataSource() != "" {
+			resolvedTable = table + "." + req.GetDataSource()
 		} else {
 			resolvedTable = table + ".1m"
+		}
+		// Granularity fallback: the environment may only retain coarser
+		// tables (e.g. .1d). A requested-but-missing granularity made every
+		// column check fail and the whole request fall back to cache.
+		if resolved := ch.ResolveTable(db, table, req.GetTimeEnd()-req.GetTimeStart(), req.GetDataSource()); resolved != "" {
+			resolvedTable = resolved
 		}
 	}
 	// Use _local table for flow_log to bypass broken Distributed table.
@@ -36,16 +44,15 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 	}
 	fullTable := fmt.Sprintf("`%s`.`%s`", db, resolvedTable)
 
-	if len(req.Queries) == 0 {
+	if req.GetNumQueries() == 0 {
 		return nil, fmt.Errorf("no queries")
 	}
-	q := req.Queries[0]
+	q := req.QueryAt(0)
 	items := clickhouse.ParseSelectList(q.Select)
 
 	constKeys := map[string]bool{}
 	var metricExprs []clickhouse.MetricExpr
 	isFlowLog := db == "flow_log"
-	isFlowMetrics := db == "flow_metrics"
 
 	for _, item := range items {
 		lower := strings.ToLower(item.Expr)
@@ -55,9 +62,32 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 			commaIdx := strings.LastIndex(inner, ",")
 			if commaIdx > 0 {
 				field := strings.TrimSpace(inner[:commaIdx])
+				field = strings.Trim(field, "`")
 				pct := strings.TrimSpace(inner[commaIdx+1:])
+				// Resolve the field like other metrics: flow_log stores
+				// rrt/rtt as response_duration; flow_metrics stores them as
+				// rrt_sum/rrt_count pairs. Without this, Percentile(`rrt`)
+				// produced quantile(0.95)(`rrt`) and ClickHouse failed on
+				// the missing 'rrt' column.
+				sqlField := field
+				if isFlowLog {
+					if field == "rrt" || field == "rtt" {
+						sqlField = "response_duration"
+					}
+				} else {
+					if !strings.Contains(field, "rrt_sum") && !strings.Contains(field, "rrt_count") {
+						sqlField = strings.ReplaceAll(field, "rrt", "rrt_sum / greatest(rrt_count, 1)")
+					}
+					if !strings.Contains(sqlField, "rtt_sum") && !strings.Contains(sqlField, "rtt_count") {
+						sqlField = strings.ReplaceAll(sqlField, "rtt", "rtt_sum / greatest(rtt_count, 1)")
+					}
+				}
+				quantileArg := sqlField
+				if !strings.Contains(sqlField, " ") && !strings.Contains(sqlField, "(") {
+					quantileArg = "`" + sqlField + "`"
+				}
 				metricExprs = append(metricExprs, clickhouse.MetricExpr{
-					Key: item.Key, SQL: fmt.Sprintf("quantile(%s)(`%s`)", pct, strings.ReplaceAll(field, "`", "")),
+					Key: item.Key, SQL: fmt.Sprintf("quantile(%s)(%s)", pct, quantileArg),
 				})
 			}
 			continue
@@ -78,12 +108,26 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 
 		if clickhouse.IsAggExpr(item.Expr) {
 			sqlExpr := clickhouse.NormalizeExpr(item.Expr)
+			if isFlowLog {
+				sqlExpr = clickhouse.GetFlowLogExpr(sqlExpr, item.Expr, table, nil, db, resolvedTable)
+			}
 
 			if isFlowLog {
 				// flow_log table: override metricMaps designed for flow_metrics.
-				// rrt/rtt is stored as response_duration in flow_log tables.
-				sqlExpr = strings.ReplaceAll(sqlExpr, "rrt_sum / nullif(rrt_count, 0)", "response_duration")
-				sqlExpr = strings.ReplaceAll(sqlExpr, "rtt_sum / nullif(rtt_count, 0)", "response_duration")
+				// Normalize case first: the frontend sends DSL functions
+				// capitalized (Sum(request)), and the rewrites below are
+				// case-sensitive — otherwise Sum(request) would reach
+				// ClickHouse as-is and fail on the missing 'request' column.
+				// flow_log column names are all lowercase, so this is safe.
+				sqlExpr = strings.ToLower(sqlExpr)
+				if strings.Contains(resolvedTable, "l4") {
+					// l4_flow_log has a bare rtt column (no rtt_sum pairs).
+					sqlExpr = strings.ReplaceAll(sqlExpr, "rtt_sum / nullif(rtt_count, 0)", "rtt")
+				} else {
+					// l7_flow_log: rrt/rtt stored as response_duration.
+					sqlExpr = strings.ReplaceAll(sqlExpr, "rrt_sum / nullif(rrt_count, 0)", "response_duration")
+					sqlExpr = strings.ReplaceAll(sqlExpr, "rtt_sum / nullif(rtt_count, 0)", "response_duration")
+				}
 				// server_error/client_error columns don't exist; use response_status.
 				sqlExpr = strings.ReplaceAll(sqlExpr, "nullif(server_error, 0) / nullif(request, 0)", "if(response_status >= 500, 1, 0)")
 				sqlExpr = strings.ReplaceAll(sqlExpr, "nullif(client_error, 0) / nullif(request, 0)", "if(response_status >= 400 AND response_status < 500, 1, 0)")
@@ -125,14 +169,14 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 	}
 
 	var wheres []string
-	if req.TimeStart > 0 {
-		wheres = append(wheres, fmt.Sprintf("time >= %d", req.TimeStart))
+	if req.GetTimeStart() > 0 {
+		wheres = append(wheres, fmt.Sprintf("time >= %d", req.GetTimeStart()))
 	}
-	if req.TimeEnd > 0 {
-		wheres = append(wheres, fmt.Sprintf("time <= %d", req.TimeEnd))
+	if req.GetTimeEnd() > 0 {
+		wheres = append(wheres, fmt.Sprintf("time <= %d", req.GetTimeEnd()))
 	}
 	if q.Where != "" {
-		cleanWhere := clickhouse.CleanWhereClause(q.Where)
+		cleanWhere := clickhouse.CleanWhereClause(q.Where, db, table)
 		if cleanWhere != "" {
 			wheres = append(wheres, cleanWhere)
 		}
@@ -150,133 +194,43 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 	qCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	// Time bucket width in seconds, shared with the per-group HISTORY query.
+	intervalSec := req.GetInterval()
+	if intervalSec <= 0 {
+		intervalSec = 300
+	}
+
 	var selectCols []string
-	if req.Interval > 0 {
-		selectCols = append(selectCols, "toUnixTimestamp(toStartOfInterval(time, toIntervalSecond(1))) AS `time`")
+	if req.GetInterval() > 0 {
+		selectCols = append(selectCols, fmt.Sprintf("toUnixTimestamp(toStartOfInterval(time, toIntervalSecond(%d))) AS `time`", intervalSec))
 	}
 	selectCols = append(selectCols, metricSelects...)
 	limitPart := " LIMIT 1"
 	groupPart := ""
-	if req.Interval > 0 {
+	if req.GetInterval() > 0 {
 		limitPart = ""
 		groupPart = " GROUP BY `time` ORDER BY `time`"
 	}
 	querySQL := fmt.Sprintf("SELECT %s FROM %s%s%s%s", strings.Join(selectCols, ", "), fullTable, whereClause, groupPart, limitPart)
-	log.Printf("CH Top SQL: %s", querySQL)
+	logging.Debugf("CH Top SQL: %s", querySQL)
 
 	rows, err := ch.Query(qCtx, querySQL)
 	if err != nil {
-		log.Printf("CH query error: %v", err)
+		logging.Errorf("CH query error: %v", err)
 		return nil, fmt.Errorf("query: %w", err)
 	}
 	defer rows.Close()
 
 	data, err := clickhouse.ScanRows(rows)
 	if err != nil {
-		log.Printf("CH scan error: %v", err)
+		logging.Errorf("CH scan error: %v", err)
 		return nil, fmt.Errorf("scan: %w", err)
 	}
-	log.Printf("CH QueryTop OK: %d rows", len(data))
+	logging.Infof("CH QueryTop OK: %d rows", len(data))
 
-	topColMap := map[string]string{
-		"auto_service":    "app_service",
-		"auto_instance":   "app_instance",
-		"auto_instance_0": "auto_instance_id_0",
-		"auto_instance_1": "auto_instance_id_1",
-		"chost":           "l3_device_id",
-		"chost_id":        "l3_device_id",
-		"vpc":             "epc_id",
-		"vpc_id":          "epc_id",
-		"pod_service":     "pod_service_id",
-		"pod_service_id":  "pod_service_id",
-		"pod_group":       "pod_group_id",
-		"pod_group_id":    "pod_group_id",
-		"pod_cluster":     "pod_cluster_id",
-		"pod_cluster_id":  "pod_cluster_id",
-		"pod_ns":          "pod_ns_id",
-		"pod_ns_id":       "pod_ns_id",
-		// Common resource tag _0/_1 mappings (flow_metrics: shared column for both sides).
-	}
-
-	// flow_log-specific column mappings for DeepFlow field names.
-	flowLogColMap := map[string]string{}
-	if isFlowLog {
-		flowLogColMap = map[string]string{
-			"event_type":    "l7_protocol",
-			"auto_instance": "if(empty(app_instance), toString(auto_instance_id_0), app_instance)",
-			"event_desc":    "request_resource",
-			// auto_service_0/1: resolve name via dictGet(device_map) matching cloud behavior.
-			"auto_service_0": "if(auto_service_type_0 IN (0, 255), if(any(is_ipv4) = 1, IPv4NumToString(any(ip4_0)), IPv6NumToString(any(ip6_0))), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_0), toUInt64(any(auto_service_id_0))), ''))",
-			"auto_service_1": "if(auto_service_type_1 IN (0, 255), if(any(is_ipv4) = 1, IPv4NumToString(any(ip4_1)), IPv6NumToString(any(ip6_1))), dictGetOrDefault('flow_tag.device_map', 'name', (toUInt64(auto_service_type_1), toUInt64(any(auto_service_id_1))), ''))",
-			// Virtual ZT columns: map to real ClickHouse columns for flow_log.
-			"client_node_type": "auto_service_type_0",
-			"server_node_type": "auto_service_type_1",
-			// flow_log: per-side _id_0/_id_1 columns (override flow_metrics shared columns).
-			"region_0": "any(dictGetOrDefault('flow_tag.region_map', 'name', toUInt64(region_id_0), ''))", "region_1": "any(dictGetOrDefault('flow_tag.region_map', 'name', toUInt64(region_id_1), ''))",
-			"az_0": "any(dictGetOrDefault('flow_tag.az_map', 'name', toUInt64(az_id_0), ''))", "az_1": "any(dictGetOrDefault('flow_tag.az_map', 'name', toUInt64(az_id_1), ''))",
-			"chost_0": "any(dictGetOrDefault('flow_tag.chost_map', 'name', toUInt64(l3_device_id_0), ''))", "chost_1": "any(dictGetOrDefault('flow_tag.chost_map', 'name', toUInt64(l3_device_id_1), ''))",
-			"chost_id_0": "l3_device_id_0", "chost_id_1": "l3_device_id_1",
-			"vpc_0": "any(dictGetOrDefault('flow_tag.l3_epc_map', 'name', toUInt64(epc_id_0), ''))", "vpc_1": "any(dictGetOrDefault('flow_tag.l3_epc_map', 'name', toUInt64(epc_id_1), ''))",
-			"vpc_id_0": "epc_id_0", "vpc_id_1": "epc_id_1",
-			"subnet_0": "subnet_id_0", "subnet_1": "subnet_id_1",
-			"router_0": "router_id_0", "router_1": "router_id_1",
-			"l2_vpc_0": "epc_id_0", "l2_vpc_1": "epc_id_1",
-			"lb_0": "lb_id_0", "lb_1": "lb_id_1",
-			"lb_listener_0": "lb_listener_id_0", "lb_listener_1": "lb_listener_id_1",
-			"pod_node_0": "any(dictGetOrDefault('flow_tag.pod_node_map', 'name', toUInt64(pod_node_id_0), ''))", "pod_node_1": "any(dictGetOrDefault('flow_tag.pod_node_map', 'name', toUInt64(pod_node_id_1), ''))",
-			"pod_ingress_0": "pod_ingress_id_0", "pod_ingress_1": "pod_ingress_id_1",
-			"pod_ns_0": "any(dictGetOrDefault('flow_tag.pod_ns_map', 'name', toUInt64(pod_ns_id_0), ''))", "pod_ns_1": "any(dictGetOrDefault('flow_tag.pod_ns_map', 'name', toUInt64(pod_ns_id_1), ''))",
-			"pod_cluster_0": "any(dictGetOrDefault('flow_tag.pod_cluster_map', 'name', toUInt64(pod_cluster_id_0), ''))", "pod_cluster_1": "any(dictGetOrDefault('flow_tag.pod_cluster_map', 'name', toUInt64(pod_cluster_id_1), ''))",
-			"pod_service_0": "any(dictGetOrDefault('flow_tag.pod_service_map', 'name', toUInt64(pod_service_id_0), ''))", "pod_service_1": "any(dictGetOrDefault('flow_tag.pod_service_map', 'name', toUInt64(pod_service_id_1), ''))",
-			"pod_group_0": "any(dictGetOrDefault('flow_tag.pod_group_map', 'name', toUInt64(pod_group_id_0), ''))", "pod_group_1": "any(dictGetOrDefault('flow_tag.pod_group_map', 'name', toUInt64(pod_group_id_1), ''))",
-			"pod_0": "pod_id_0", "pod_1": "pod_id_1",
-			"service_0": "any(dictGetOrDefault('flow_tag.biz_service_map', 'name', toUInt64(biz_service_id_0), ''))", "service_1": "any(dictGetOrDefault('flow_tag.biz_service_map', 'name', toUInt64(biz_service_id_1), ''))",
-			"gprocess_0": "gprocess_id_0", "gprocess_1": "gprocess_id_1",
-			"tap_port": "tap_port", "vtap": "vtap_id", "agent": "agent_id",
-			// Computed virtual columns.
-			"is_internet_0": "any(if(is_ipv4=1 AND (startsWith(IPv4NumToString(ip4_0),'10.') OR startsWith(IPv4NumToString(ip4_0),'172.1') OR startsWith(IPv4NumToString(ip4_0),'172.2') OR startsWith(IPv4NumToString(ip4_0),'172.3') OR startsWith(IPv4NumToString(ip4_0),'192.168.') OR startsWith(IPv4NumToString(ip4_0),'127.') OR startsWith(IPv4NumToString(ip4_0),'100.6') OR startsWith(IPv4NumToString(ip4_0),'100.7') OR startsWith(IPv4NumToString(ip4_0),'100.8') OR startsWith(IPv4NumToString(ip4_0),'100.9') OR startsWith(IPv4NumToString(ip4_0),'100.10') OR startsWith(IPv4NumToString(ip4_0),'100.11') OR startsWith(IPv4NumToString(ip4_0),'100.12')),0,1))",
-			"is_internet_1": "any(if(is_ipv4=1 AND (startsWith(IPv4NumToString(ip4_1),'10.') OR startsWith(IPv4NumToString(ip4_1),'172.1') OR startsWith(IPv4NumToString(ip4_1),'172.2') OR startsWith(IPv4NumToString(ip4_1),'172.3') OR startsWith(IPv4NumToString(ip4_1),'192.168.') OR startsWith(IPv4NumToString(ip4_1),'127.') OR startsWith(IPv4NumToString(ip4_1),'100.6') OR startsWith(IPv4NumToString(ip4_1),'100.7') OR startsWith(IPv4NumToString(ip4_1),'100.8') OR startsWith(IPv4NumToString(ip4_1),'100.9') OR startsWith(IPv4NumToString(ip4_1),'100.10') OR startsWith(IPv4NumToString(ip4_1),'100.11') OR startsWith(IPv4NumToString(ip4_1),'100.12')),0,1))",
-			"role":          "0",
-			"process_0":     "process_id_0", "process_1": "process_id_1",
-			"x_request_0": "x_request_id_0", "x_request_1": "x_request_id_1",
-			"k8s.label_0": "any(dictGetOrDefault('flow_tag.pod_k8s_labels_map', 'labels', toUInt64(pod_id_0), ''))",
-			"k8s.label_1": "any(dictGetOrDefault('flow_tag.pod_k8s_labels_map', 'labels', toUInt64(pod_id_1), ''))",
-			"cloud.tag_0": "any(dictGetOrDefault('flow_tag.chost_cloud_tags_map', 'cloud_tags', toUInt64(l3_device_id_0), ''))",
-			"cloud.tag_1": "any(dictGetOrDefault('flow_tag.chost_cloud_tags_map', 'cloud_tags', toUInt64(l3_device_id_1), ''))",
-			"os.app_0":    "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_0), ''))",
-			"os.app_1":    "any(dictGetOrDefault('flow_tag.os_app_tags_map', 'os_app_tags', toUInt64(gprocess_id_1), ''))",
-		}
-	}
-
-	// flow_metrics-specific: _0/_1 both map to same shared column.
-	flowMetricsColMap := map[string]string{}
-	if isFlowMetrics {
-		flowMetricsColMap = map[string]string{
-			"auto_service_0":  "app_service",
-			"auto_service_1":  "app_service",
-			"auto_instance_0": "app_instance",
-			"auto_instance_1": "app_instance",
-			"chost_0":         "l3_device_id", "chost_1": "l3_device_id",
-			"region_0": "region_id", "region_1": "region_id",
-			"az_0": "az_id", "az_1": "az_id",
-			"subnet_0": "subnet_id", "subnet_1": "subnet_id",
-			"vpc_0": "l3_epc_id", "vpc_1": "l3_epc_id",
-			"pod_ns_0": "pod_ns_id", "pod_ns_1": "pod_ns_id",
-			"pod_cluster_0": "pod_cluster_id", "pod_cluster_1": "pod_cluster_id",
-			"pod_service_0": "pod_service_id", "pod_service_1": "pod_service_id",
-			"pod_group_0": "pod_group_id", "pod_group_1": "pod_group_id",
-			"pod_node_0": "pod_node_id", "pod_node_1": "pod_node_id",
-			"service_0": "biz_service_id", "service_1": "biz_service_id",
-		}
-	}
-
-	// flow_log columns that don't exist in raw ClickHouse: skip from tags/group.
-	flowLogSkipCols := map[string]bool{}
-	if isFlowLog {
-		flowLogSkipCols = map[string]bool{
-			"_0": true, "_1": true,
-		}
-	}
+	// Tag mappings come from the unified maps (clickhouse.TagExpr /
+	// TagIDExpr for flow_metrics, ColumnExpr / IDColumn for flow_log,
+	// TagSideExpr for _0/_1 client/server views).
 
 	// If tags present, do grouped aggregation.
 	var tagCols []string
@@ -301,29 +255,54 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 		if _, err := fmt.Sscanf(rawExpr, "%f", new(float64)); err == nil {
 			continue
 		}
-		// Skip virtual columns that don't exist in raw ClickHouse.
-		if isFlowLog && flowLogSkipCols[colName] {
-			continue
-		}
 		mappedCol := colName
-		if m, ok := topColMap[colName]; ok {
-			mappedCol = m
-		} else if m2, ok2 := flowLogColMap[colName]; ok2 {
-			mappedCol = m2
-		} else if m3, ok3 := flowMetricsColMap[colName]; ok3 {
-			mappedCol = m3
-		} else if m3, ok3 := flowMetricsColMap[colName]; ok3 {
-			mappedCol = m3
-		}
-		// For flow_log, dictGet/IP expressions go in SELECT (wrapped in any() if needed) but NOT in GROUP BY.
-		if isFlowLog && (strings.Contains(mappedCol, "dictGet") || strings.Contains(mappedCol, "IPv4")) {
-			// Expression already includes aggregate functions (any()), just use as-is.
-			if strings.Contains(mappedCol, "any(") {
-				tagCols = append(tagCols, fmt.Sprintf("%s AS `%s`", mappedCol, colName))
-			} else {
-				tagCols = append(tagCols, fmt.Sprintf("any(%s) AS `%s`", mappedCol, colName))
+		if isFlowLog {
+			if expr := clickhouse.ColumnExpr(colName, true); expr != "" {
+				mappedCol = expr
 			}
-			// Don't add to groupCols — the ID columns already cover the grouping.
+		} else if expr := clickhouse.TagExpr("flow_metrics", table, colName); expr != "" {
+			// $any() placeholders (auto_service IP fallback) expand to any()
+			// for SELECT; GROUP BY uses the bare form via TagGroupExpr below.
+			mappedCol = clickhouse.ExpandAny(expr, true)
+		} else if expr := clickhouse.TagSideExpr("flow_metrics", table, colName); expr != "" {
+			mappedCol = expr
+		}
+		// Bare columns (no mapping) are pre-checked against the physical
+		// schema; unsupported signatures fall through the chain.
+		if mappedCol == colName && !ch.HasColumn(db, resolvedTable, colName) {
+			return nil, fmt.Errorf("%w: %s", clickhouse.ErrUnsupportedColumn, colName)
+		}
+		// dictGet/IP/computed expressions go in SELECT; grouping uses the
+		// underlying physical ID column when one exists. For computed tags
+		// without an ID column (is_internet, ...) the GROUP BY key must be
+		// the BARE non-aggregated expression — backticking the grouped form
+		// (any(if(...))) would make ClickHouse read it as a column name and
+		// fail the query.
+		if strings.Contains(mappedCol, "dictGet") || strings.Contains(mappedCol, "IPv4") || strings.Contains(mappedCol, "any(") {
+			tagCols = append(tagCols, fmt.Sprintf("%s AS `%s`", mappedCol, colName))
+			if group := clickhouse.TagGroupExpr("flow_metrics", table, colName); group != "" {
+				groupCols = append(groupCols, group)
+			} else if idCol := clickhouse.IDColumn(colName); idCol != colName {
+				groupCols = append(groupCols, fmt.Sprintf("`%s`", idCol))
+			} else {
+				// No physical ID column: group by the non-aggregated
+				// expression (ColumnExpr with grouped=false strips any()).
+				plain := clickhouse.ColumnExpr(colName, false)
+				if plain == "" || plain == colName {
+					plain = mappedCol
+				}
+				groupCols = append(groupCols, plain)
+			}
+		} else if strings.Contains(mappedCol, "(") {
+			// Computed expression (flow_metrics is_internet_0/1): SELECT the
+			// any(...) form, GROUP BY the bare expression (backticking the
+			// whole if(...) would read as a column name).
+			tagCols = append(tagCols, fmt.Sprintf("%s AS `%s`", mappedCol, colName))
+			if g := clickhouse.TagSideGroupExpr("flow_metrics", table, colName); g != "" {
+				groupCols = append(groupCols, g)
+			} else {
+				groupCols = append(groupCols, mappedCol)
+			}
 		} else {
 			tagCols = append(tagCols, fmt.Sprintf("`%s` AS `%s`", mappedCol, colName))
 			groupCols = append(groupCols, fmt.Sprintf("`%s`", mappedCol))
@@ -359,29 +338,54 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 		if _, err := fmt.Sscanf(gb, "%f", new(float64)); err == nil {
 			continue
 		}
-		if isFlowLog && flowLogSkipCols[gb] {
-			continue
-		}
 		// Skip constants and function aliases (newTag('x'), node_type('x'), -42, etc.)
 		if constKeys[gb] {
 			continue
 		}
 		mappedCol := gb
-		if m, ok := topColMap[gb]; ok {
-			mappedCol = m
-		} else if m2, ok2 := flowLogColMap[gb]; ok2 {
-			mappedCol = m2
-		} else if m3, ok3 := flowMetricsColMap[gb]; ok3 {
-			mappedCol = m3
-		} else if m3, ok3 := flowMetricsColMap[gb]; ok3 {
-			mappedCol = m3
+		if isFlowLog {
+			if expr := clickhouse.ColumnExpr(gb, true); expr != "" {
+				mappedCol = expr
+			}
+		} else if expr := clickhouse.TagExpr("flow_metrics", table, gb); expr != "" {
+			mappedCol = clickhouse.ExpandAny(expr, true)
+		} else if expr := clickhouse.TagSideExpr("flow_metrics", table, gb); expr != "" {
+			mappedCol = expr
 		}
-		// For flow_log, dictGet/IP expressions go in SELECT (wrapped in any() if needed) but NOT in GROUP BY.
-		if isFlowLog && (strings.Contains(mappedCol, "dictGet") || strings.Contains(mappedCol, "IPv4")) {
-			if strings.Contains(mappedCol, "any(") {
-				tagCols = append(tagCols, fmt.Sprintf("%s AS `%s`", mappedCol, gb))
+		// Bare columns (no mapping) are pre-checked against the physical
+		// schema; unsupported signatures fall through the chain.
+		if mappedCol == gb && !ch.HasColumn(db, resolvedTable, gb) {
+			return nil, fmt.Errorf("%w: %s", clickhouse.ErrUnsupportedColumn, gb)
+		}
+		// dictGet/IP/computed expressions go in SELECT; grouping uses the
+		// underlying physical ID column when one exists. For computed tags
+		// without an ID column (is_internet, ...) the GROUP BY key must be
+		// the BARE non-aggregated expression — backticking the grouped form
+		// (any(if(...))) would make ClickHouse read it as a column name and
+		// fail the query.
+		if strings.Contains(mappedCol, "dictGet") || strings.Contains(mappedCol, "IPv4") || strings.Contains(mappedCol, "any(") {
+			tagCols = append(tagCols, fmt.Sprintf("%s AS `%s`", mappedCol, gb))
+			if group := clickhouse.TagGroupExpr("flow_metrics", table, gb); group != "" {
+				groupCols = append(groupCols, group)
+			} else if idCol := clickhouse.IDColumn(gb); idCol != gb {
+				groupCols = append(groupCols, fmt.Sprintf("`%s`", idCol))
 			} else {
-				tagCols = append(tagCols, fmt.Sprintf("any(%s) AS `%s`", mappedCol, gb))
+				// No physical ID column: group by the non-aggregated
+				// expression (ColumnExpr with grouped=false strips any()).
+				plain := clickhouse.ColumnExpr(gb, false)
+				if plain == "" || plain == gb {
+					plain = mappedCol
+				}
+				groupCols = append(groupCols, plain)
+			}
+		} else if strings.Contains(mappedCol, "(") {
+			// Computed expression (flow_metrics is_internet_0/1): GROUP BY
+			// the bare expression — backticking if(...) would fail.
+			tagCols = append(tagCols, fmt.Sprintf("%s AS `%s`", mappedCol, gb))
+			if g := clickhouse.TagSideGroupExpr("flow_metrics", table, gb); g != "" {
+				groupCols = append(groupCols, g)
+			} else {
+				groupCols = append(groupCols, mappedCol)
 			}
 		} else {
 			tagCols = append(tagCols, fmt.Sprintf("`%s` AS `%s`", mappedCol, gb))
@@ -390,15 +394,36 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 	}
 
 	if len(tagCols) > 0 && len(groupCols) > 0 {
-		groupSQL := fmt.Sprintf("SELECT %s, %s FROM %s%s GROUP BY %s",
-			strings.Join(metricSelects, ", "), strings.Join(tagCols, ", "),
-			fullTable, whereClause, strings.Join(groupCols, ", "))
-		if req.PageSize > 0 {
-			groupSQL += fmt.Sprintf(" LIMIT %d", req.PageSize)
+		// Also select the grouping ID columns so per-group HISTORY filters can
+		// reference them (virtual tags like region_0 have no physical column).
+		groupSelect := append(append([]string{}, tagCols...), groupCols...)
+		// Order groups by the requested SORT column (fallback: first metric),
+		// so TOP-N actually returns the top groups instead of arbitrary rows.
+		orderCol := ""
+		orderDir := "DESC"
+		if ob := req.GetSortOrderBy(); ob != "" {
+			for _, m := range metricExprs {
+				if strings.EqualFold(ob, m.Key) {
+					orderCol = fmt.Sprintf("`%s`", m.Key)
+					break
+				}
+			}
+		}
+		if orderCol == "" && len(metricExprs) > 0 {
+			orderCol = fmt.Sprintf("`%s`", metricExprs[0].Key)
+		}
+		if sd := req.GetSortSortedBy(); sd != "" {
+			orderDir = strings.ToUpper(sd)
+		}
+		groupSQL := fmt.Sprintf("SELECT %s, %s FROM %s%s GROUP BY %s ORDER BY %s %s",
+			strings.Join(metricSelects, ", "), strings.Join(groupSelect, ", "),
+			fullTable, whereClause, strings.Join(groupCols, ", "), orderCol, orderDir)
+		if req.GetPageSize() > 0 {
+			groupSQL += fmt.Sprintf(" LIMIT %d", req.GetPageSize())
 		} else {
 			groupSQL += " LIMIT 50"
 		}
-		log.Printf("CH Top grouped SQL: %s", groupSQL)
+		logging.Debugf("CH Top grouped SQL: %s", groupSQL)
 
 		rows.Close()
 		gRows, gErr := ch.Query(qCtx, groupSQL)
@@ -406,12 +431,12 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 			defer gRows.Close()
 			if gData, gErr2 := clickhouse.ScanRows(gRows); gErr2 == nil {
 				data = gData
-				log.Printf("CH Top grouped: %d rows", len(data))
+				// logging.Debugf("CH Top grouped: %d rows", len(data))
 			} else {
-				log.Printf("⚠️  CH Top grouped scan error: %v", gErr2)
+				logging.Errorf("CH Top grouped scan error: %v", gErr2)
 			}
 		} else {
-			log.Printf("⚠️  CH Top grouped query error: %v", gErr)
+			logging.Errorf("CH Top grouped query error: %v", gErr)
 		}
 	}
 
@@ -422,11 +447,14 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 	var resultRows []map[string]interface{}
 	seenUID := map[string]bool{}
 	for _, row := range data {
+		// Build UID from the SELECTed tag/group columns (tagCols covers both the
+		// TAGS format and the flat GROUP_BY format — previously GROUP_BY-only
+		// requests got UID "_" for every row and all but the first were dropped).
 		var uidParts []string
-		for _, tc := range q.Tags {
+		for _, tc := range tagCols {
 			cn := tc
 			if idx := strings.LastIndex(strings.ToUpper(tc), " AS "); idx >= 0 {
-				cn = strings.TrimSpace(cn[idx+4:])
+				cn = strings.TrimSpace(tc[idx+4:])
 				cn = strings.Trim(cn, "`")
 			}
 			if cn != "" {
@@ -440,7 +468,53 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 			uid = strings.Join(uidParts, ",")
 		}
 
-		resultRow := map[string]interface{}{"_querier_region": "本地", "UID": uid}
+		resultRow := map[string]interface{}{"_querier_region": clickhouse.QuerierRegion, "UID": uid}
+		// Graph-node contract fields: cloud Top rows always carry
+		// UID_NAME/FULL_NAME/NAME/TAGS (verified against api_cache and
+		// cloud.deepflow.yunshan.net). Placeholder rows — all tag values are
+		// "_" or DSL constants (knowledge-graph queries like
+		// node_type('_')/newTag('_')) — get UID_NAME="*" and empty strings;
+		// real rows get "tag=value" strings and a TAGS JSON of the row's tag
+		// columns. Missing UID_NAME made the knowledge-graph frontend crash
+		// (flatMap reading 'key' of undefined).
+		placeholder := len(uidParts) == 0
+		if !placeholder {
+			placeholder = true
+			for _, p := range uidParts {
+				if !strings.HasSuffix(p, "=_") {
+					placeholder = false
+					break
+				}
+			}
+		}
+		if placeholder {
+			resultRow["UID_NAME"] = "*"
+			resultRow["FULL_NAME"] = ""
+			resultRow["NAME"] = ""
+			resultRow["TAGS"] = "{}"
+		} else {
+			resultRow["UID_NAME"] = uid
+			resultRow["FULL_NAME"] = strings.ReplaceAll(uid, ",", "，")
+			resultRow["NAME"] = nil
+			tagJSON := map[string]interface{}{}
+			for _, tc := range tagCols {
+				cn := tc
+				if idx := strings.LastIndex(strings.ToUpper(tc), " AS "); idx >= 0 {
+					cn = strings.TrimSpace(tc[idx+4:])
+					cn = strings.Trim(cn, "`")
+				}
+				if cn != "" {
+					if v, ok := row[cn]; ok {
+						tagJSON[cn] = v
+					}
+				}
+			}
+			if tj, err := json.Marshal(tagJSON); err == nil {
+				resultRow["TAGS"] = string(tj)
+			} else {
+				resultRow["TAGS"] = "{}"
+			}
+		}
 		for _, tc := range q.Tags {
 			cn := tc
 			rawExpr := strings.TrimSpace(tc)
@@ -472,11 +546,35 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 				}
 			}
 		}
+		// GROUP_BY-only (flat format) requests have no TAGS entries; carry the
+		// grouped columns into the result row from tagCols instead.
+		for _, tc := range tagCols {
+			cn := tc
+			if idx := strings.LastIndex(strings.ToUpper(tc), " AS "); idx >= 0 {
+				cn = strings.TrimSpace(tc[idx+4:])
+				cn = strings.Trim(cn, "`")
+			}
+			if cn == "" {
+				continue
+			}
+			if _, exists := resultRow[cn]; !exists {
+				if v, ok := row[cn]; ok {
+					resultRow[cn] = v
+				}
+			}
+		}
 		for _, m := range metricExprs {
 			if v, ok := row[m.Key]; ok {
 				resultRow[m.Key] = v
 			}
 		}
+
+		// Deduplicate before the per-group HISTORY query: a duplicate UID's
+		// history would be computed and then discarded (N+1 waste).
+		if seenUID[uid] {
+			continue
+		}
+		seenUID[uid] = true
 
 		// Per-group history.
 		histWheres := make([]string, len(wheres))
@@ -500,8 +598,20 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 			if cn != "" {
 				if v, ok := row[cn]; ok {
 					mappedCN := cn
-					if m, ok := topColMap[cn]; ok {
-						mappedCN = m
+					if isFlowLog {
+						// Virtual tags resolve to ID columns; the grouped query
+						// selects them alongside, so compare on the ID value.
+						if id := clickhouse.IDColumn(cn); id != cn {
+							mappedCN = id
+							if v2, ok2 := row[id]; ok2 {
+								v = v2
+							}
+						}
+					} else if id := clickhouse.TagIDExpr("flow_metrics", table, cn); id != cn {
+						mappedCN = id
+						if v2, ok2 := row[id]; ok2 {
+							v = v2
+						}
 					}
 					histWheres = append(histWheres, fmt.Sprintf("`%s` = '%v'", mappedCN, v))
 				}
@@ -511,30 +621,22 @@ func QueryTop(ch *clickhouse.CHService, ctx context.Context, req *clickhouse.Que
 		if len(histWheres) > 0 {
 			histWhere = " WHERE " + strings.Join(histWheres, " AND ")
 		}
-		intervalSec := req.Interval
-		if intervalSec <= 0 {
-			intervalSec = 300
-		}
 		hSQL := fmt.Sprintf("SELECT toUnixTimestamp(toStartOfInterval(time, INTERVAL %d SECOND)) AS toi, %s FROM %s%s GROUP BY toi ORDER BY toi LIMIT 500",
 			intervalSec, strings.Join(metricSelects, ", "), fullTable, histWhere)
 		histRows, hErr := ch.Query(qCtx, hSQL)
 		if hErr == nil {
 			if histData, hErr2 := clickhouse.ScanRows(histRows); hErr2 == nil {
-				resultRow["HISTORY"] = tracemap.FillNullHistory(tracemap.ConvertHistory(histData, metricExprs), int64(req.Interval), req.TimeStart, req.TimeEnd, req.Fill, metricExprs)
+				resultRow["HISTORY"] = tracemap.FillNullHistory(tracemap.ConvertHistory(histData, metricExprs), int64(req.GetInterval()), req.GetTimeStart(), req.GetTimeEnd(), req.GetFill(), metricExprs)
 			}
 			histRows.Close()
 		}
-		if seenUID[uid] {
-			continue
-		}
-		seenUID[uid] = true
 		resultRows = append(resultRows, resultRow)
 	}
 
 	// Build pre_as map from SELECT expressions (same as List handler).
 	preAsMap := map[string]string{}
-	if len(req.Queries) > 0 && req.Queries[0].Select != "" {
-		for _, item := range clickhouse.ParseSelectList(req.Queries[0].Select) {
+	if req.GetNumQueries() > 0 && req.QueryAt(0).Select != "" {
+		for _, item := range clickhouse.ParseSelectList(req.QueryAt(0).Select) {
 			if item.Key != item.Expr {
 				preAsMap[item.Key] = strings.ReplaceAll(item.Expr, "`", "")
 			}
