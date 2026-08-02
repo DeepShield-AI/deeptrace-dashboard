@@ -9,7 +9,9 @@ __pycache__/
 *.py[cod]
 temp/
 tools/real_api_capture_*.json
-
+env/
+logs/
 docs/
+tools/
 backend/deeptrace-backend
 backend/transport/deeptrace-server

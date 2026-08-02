@@ -1,0 +1,65 @@
+# golangci-lint configuration for the DeepTrace backend.
+# Run with: golangci-lint run ./...
+# Format with: gofumpt -w . && goimports -w .
+
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - revive
+    - unparam
+  disable:
+    - exhaustive
+
+linters-settings:
+  errcheck:
+    # Ignore error returns that are idiomatic to ignore in HTTP handlers:
+    # response writes and probe-style JSON parsing (type-checking unmarshal).
+    exclude-functions:
+      - (*net/http.ResponseWriter).Write
+      - net/http.ResponseWriter.Write
+      - (io.Writer).Write
+      - (*encoding/json.Encoder).Encode
+      - (http.ResponseWriter).Write
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+
+issues:
+  exclude-rules:
+    # Package-prefixed names (topo.TopoNodeTypeFor, fastlist.FastListRequest)
+    # are an accepted convention here — they keep call sites unambiguous.
+    - text: "stutters"
+      linters:
+        - revive
+    # Handler response writes: a client disconnect mid-write is not actionable.
+    - path: transport/
+      text: "Error return value of .*Write.* is not checked"
+      linters:
+        - errcheck
+    # Probe-style unmarshal used to detect request shape.
+    - path: transport/
+      text: "Error return value of `json.Unmarshal` is not checked"
+      linters:
+        - errcheck
+    - path: query/
+      text: "Error return value of `json.Unmarshal` is not checked"
+      linters:
+        - errcheck
+    # fmt.Sscanf used as a numeric-literal detector (err == nil means numeric).
+    - path: query/
+      text: "Error return value of `fmt.Sscanf` is not checked"
+      linters:
+        - errcheck

@@ -4,10 +4,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"deeptrace-backend/logging"
 )
 
 // Cache holds pre-loaded API responses from the api_cache/ directory.
@@ -35,7 +36,7 @@ func New(dir string) *Cache {
 
 	files, err := os.ReadDir(dir)
 	if err != nil {
-		log.Printf("⚠️  No api_cache dir: %v", err)
+		logging.Warnf("No api_cache dir: %v", err)
 		return c
 	}
 	for _, f := range files {
@@ -76,13 +77,17 @@ func New(dir string) *Cache {
 			c.len++
 		}
 	}
-	log.Printf("📦 Loaded %d API cache entries", c.len)
+	logging.Infof("Loaded %d API cache entries", c.len)
 	return c
 }
 
 // Find looks up a response by METHOD and full URL path (with query string).
 func (c *Cache) Find(method, fullPath string) []byte {
-	return c.entries[method+" "+fullPath]
+	key := method + " " + fullPath
+	if resp, ok := c.entries[key]; ok {
+		return hit(key, resp)
+	}
+	return nil
 }
 
 // FindWithBody performs body‑aware lookup for POST requests.
@@ -94,14 +99,14 @@ func (c *Cache) FindWithBody(method, urlPath, body string) []byte {
 	bodyMap, ok := c.bodyEntries[key]
 	if !ok || body == "" {
 		if resp, ok2 := c.entries[key]; ok2 {
-			return resp
+			return hit(key, resp)
 		}
 		return nil
 	}
 
 	// 1. Exact match.
 	if resp, ok2 := bodyMap[body]; ok2 {
-		return resp
+		return hit(key, resp)
 	}
 
 	// 2. Normalized JSON comparison (ignores key ordering).
@@ -113,21 +118,31 @@ func (c *Cache) FindWithBody(method, urlPath, body string) []byte {
 			if json.Unmarshal([]byte(cachedBody), &cachedMap) == nil {
 				normCached, _ := json.Marshal(cachedMap)
 				if string(normReq) == string(normCached) {
-					return resp
+					return hit(key, resp)
 				}
 			}
 		}
 	}
 
 	// 3. Structured match on DATABASE / TABLE / TAG fields.
-	// Matches for all endpoints (List, Top, DBDescription, etc.) by finding
-	// a cached entry with the same DATABASE and TABLE. More specific matches
-	// (also matching TAG) take priority.
+	// A candidate is only accepted when TABLE matches (score >= 2) — a
+	// DATABASE-only match could return another table's data (e.g. a cached
+	// l7_flow_log response for an l4_flow_log request). More specific
+	// matches (also matching TAG) take priority.
+	//
+	// Additionally the candidate's QUERIES signature (SELECT + WHERE of every
+	// sub-query) must match the request's, and the time windows must overlap.
+	// Otherwise a request with a different aggregation or a different time
+	// range would get stale data from an unrelated cached response.
 	var reqMap map[string]interface{}
 	if json.Unmarshal([]byte(body), &reqMap) == nil && len(reqMap) > 0 {
 		reqDB := fmt.Sprintf("%v", reqMap["DATABASE"])
 		reqTable := fmt.Sprintf("%v", reqMap["TABLE"])
 		reqTag := fmt.Sprintf("%v", reqMap["TAG"])
+		// The frontend sends lower-case time_start/time_end; older clients and
+		// some cache bodies use upper-case TIME_START/TIME_END. Accept both.
+		reqStart := windowValue(reqMap, "TIME_START", "time_start")
+		reqEnd := windowValue(reqMap, "TIME_END", "time_end")
 
 		var bestResp []byte
 		bestScore := 0
@@ -135,6 +150,12 @@ func (c *Cache) FindWithBody(method, urlPath, body string) []byte {
 		for cachedBody, resp := range bodyMap {
 			var cMap map[string]interface{}
 			if json.Unmarshal([]byte(cachedBody), &cMap) != nil {
+				continue
+			}
+			if !queriesCompatible(reqMap, cMap) {
+				continue
+			}
+			if !windowsOverlap(reqStart, reqEnd, cMap) {
 				continue
 			}
 			score := 0
@@ -147,14 +168,14 @@ func (c *Cache) FindWithBody(method, urlPath, body string) []byte {
 			if fmt.Sprintf("%v", cMap["TAG"]) == reqTag && reqTag != "<nil>" {
 				score += 4
 			}
-			if score > bestScore || (score == bestScore && score > 0 && len(resp) > bestLen) {
+			if score >= 2 && (score > bestScore || (score == bestScore && len(resp) > bestLen)) {
 				bestScore = score
 				bestLen = len(resp)
 				bestResp = resp
 			}
 		}
 		if bestResp != nil {
-			return bestResp
+			return hit(key, bestResp)
 		}
 	}
 
@@ -163,10 +184,16 @@ func (c *Cache) FindWithBody(method, urlPath, body string) []byte {
 	// body still returns the first cached entry, which is almost certainly wrong.
 	if _, hasBodyEntries := c.bodyEntries[key]; !hasBodyEntries {
 		if resp, ok2 := c.entries[key]; ok2 {
-			return resp
+			return hit(key, resp)
 		}
 	}
 	return nil
+}
+
+// hit logs a cache hit at warn level (yellow) and returns the response.
+func hit(key string, resp []byte) []byte {
+	logging.Warnf("api cache hit: %s", key)
+	return resp
 }
 
 // Len returns the number of cached entries.
@@ -177,6 +204,81 @@ func (c *Cache) Len() int {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// numValue coerces a JSON number to int64 (0 when absent/unparseable).
+func numValue(v interface{}) int64 {
+	switch n := v.(type) {
+	case float64:
+		return int64(n)
+	case int64:
+		return n
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i
+		}
+	case string:
+		var i int64
+		if _, err := fmt.Sscanf(n, "%d", &i); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+// queriesCompatible reports whether the request and cached body select/filter
+// the same data: every QUERIES entry must have an identical SELECT + WHERE
+// (the aggregation and filter shape). When the request carries no QUERIES we
+// cannot compare, so the candidate passes (legacy bodies).
+func queriesCompatible(reqMap, cMap map[string]interface{}) bool {
+	reqQueries, reqOK := reqMap["QUERIES"].([]interface{})
+	cacheQueries, cacheOK := cMap["QUERIES"].([]interface{})
+	if !reqOK || len(reqQueries) == 0 {
+		return true
+	}
+	if !cacheOK || len(cacheQueries) != len(reqQueries) {
+		return false
+	}
+	for i := range reqQueries {
+		rq, rk := reqQueries[i].(map[string]interface{})
+		cq, ck := cacheQueries[i].(map[string]interface{})
+		if !rk || !ck {
+			return false
+		}
+		rSel, _ := rq["SELECT"].(string)
+		rWh, _ := rq["WHERE"].(string)
+		rHav, _ := rq["HAVING"].(string)
+		cSel, _ := cq["SELECT"].(string)
+		cWh, _ := cq["WHERE"].(string)
+		cHav, _ := cq["HAVING"].(string)
+		if strings.TrimSpace(rSel) != strings.TrimSpace(cSel) ||
+			strings.TrimSpace(rWh) != strings.TrimSpace(cWh) ||
+			strings.TrimSpace(rHav) != strings.TrimSpace(cHav) {
+			return false
+		}
+	}
+	return true
+}
+
+// windowValue reads a time key that may appear upper- or lower-cased in the
+// request/cached body (frontend: time_start; legacy clients: TIME_START).
+func windowValue(m map[string]interface{}, upper, lower string) int64 {
+	if v := numValue(m[upper]); v > 0 {
+		return v
+	}
+	return numValue(m[lower])
+}
+
+// windowsOverlap reports whether the request's time window intersects the
+// cached request's window. Both sides must have a full window; otherwise we
+// have no information and pass.
+func windowsOverlap(reqStart, reqEnd int64, cMap map[string]interface{}) bool {
+	cStart := windowValue(cMap, "TIME_START", "time_start")
+	cEnd := windowValue(cMap, "TIME_END", "time_end")
+	if reqStart <= 0 || reqEnd <= 0 || cStart <= 0 || cEnd <= 0 {
+		return true
+	}
+	return reqStart <= cEnd && cStart <= reqEnd
+}
 
 // extractReqBody reads requestBody from the raw cache file JSON.
 func extractReqBody(raw []byte) string {

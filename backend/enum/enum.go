@@ -3,10 +3,10 @@ package enum
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 
 	"deeptrace-backend/clickhouse"
+	"deeptrace-backend/logging"
 )
 
 // EnumService provides human-readable display names for enum values by loading
@@ -30,10 +30,10 @@ func (s *EnumService) Init() {
 	s.once.Do(func() {
 		s.maps = loadFromCH(s.ch)
 		if s.maps != nil {
-			log.Printf("✅ Loaded %d enum types from ClickHouse dictionaries", len(s.maps))
+			logging.Infof("Loaded %d enum types from ClickHouse dictionaries", len(s.maps))
 		} else {
 			s.maps = fallbackEnumMaps()
-			log.Printf("📋 Using built-in enum maps (%d types)", len(s.maps))
+			logging.Warnf("Using built-in enum maps (%d types)", len(s.maps))
 		}
 	})
 }
@@ -75,7 +75,7 @@ func loadFromCH(ch *clickhouse.CHService) map[string]map[string]string {
 			}
 		}
 	} else {
-		log.Printf("⚠️  int_enum_map load: %v", err)
+		logging.Errorf("int_enum_map load: %v", err)
 	}
 
 	// Load string_enum_map (tag_name, value, name_zh, name_en, …)
@@ -91,7 +91,7 @@ func loadFromCH(ch *clickhouse.CHService) map[string]map[string]string {
 			}
 		}
 	} else {
-		log.Printf("⚠️  string_enum_map load: %v", err)
+		logging.Errorf("string_enum_map load: %v", err)
 	}
 
 	if len(result) == 0 {
@@ -108,6 +108,11 @@ func insertEnumMap(m map[string]map[string]string, tag, val, name string) {
 	}
 	sub[val] = name
 }
+
+// FallbackEnumMaps provides correct default values when ClickHouse is unavailable.
+// All values are sourced from ClickHouse Dictionaries (int_enum_map, string_enum_map).
+// Exported so other query paths (flowlog, showtagvalues) share one source of truth.
+func FallbackEnumMaps() map[string]map[string]string { return fallbackEnumMaps() }
 
 // fallbackEnumMaps provides correct default values when ClickHouse is unavailable.
 // All values are sourced from ClickHouse Dictionaries (int_enum_map, string_enum_map).
@@ -126,9 +131,14 @@ func fallbackEnumMaps() map[string]map[string]string {
 		"l7_protocol": {
 			"0": "N/A", "1": "",
 			"20": "HTTP", "21": "HTTP2", "40": "Dubbo", "41": "gRPC",
-			"60": "MySQL", "61": "PostgreSQL", "68": "",
-			"80": "Redis", "100": "Kafka", "101": "MQTT",
-			"120": "DNS", "121": "TLS",
+			"43": "SofaRPC", "44": "FastCGI", "45": "bRPC", "46": "Tars",
+			"47": "Some/IP", "48": "ISO-8583", "49": "Triple", "50": "NetSign",
+			"60": "MySQL", "61": "PostgreSQL", "62": "Oracle", "63": "Dameng",
+			"80": "Redis", "81": "MongoDB", "82": "Memcached",
+			"100": "Kafka", "101": "MQTT", "102": "AMQP", "103": "OpenWire",
+			"104": "NATS", "105": "Pulsar", "106": "ZMTP", "107": "RocketMQ",
+			"108": "WebSphereMQ",
+			"120": "DNS", "121": "TLS", "122": "Ping", "127": "Custom",
 		},
 		"protocol": {
 			"0": "HOPOPT", "1": "ICMP", "2": "IGMP",
@@ -136,18 +146,29 @@ func fallbackEnumMaps() map[string]map[string]string {
 			"41": "IPv6", "47": "GRE", "50": "ESP", "51": "AH",
 			"58": "IPv6-ICMP", "89": "OSPF", "103": "PIM", "132": "SCTP",
 		},
-		"is_tls":              {"0": "否", "1": "是"},
-		"is_async":            {"0": "否", "1": "是"},
-		"status":              {"0": "正常", "1": "异常", "2": "超时"},
-		"role":                {"0": "客户端", "1": "服务端", "2": "内部"},
-		"is_internet":         {"0": "内网", "1": "公网"},
-		"signal_source":       {"0": "Packet", "3": "eBPF", "4": "OTel"},
+		"is_tls":           {"0": "否", "1": "是"},
+		"is_async":         {"0": "否", "1": "是"},
+		"status":           {"0": "正常", "1": "异常", "2": "超时"},
+		"role":             {"0": "客户端", "1": "服务端", "2": "内部"},
+		"is_internet":      {"0": "内网", "1": "公网"},
+		"signal_source":    {"0": "Packet", "3": "eBPF", "4": "OTel"},
+		"l7_signal_source": {"0": "Packet", "3": "eBPF", "4": "OTel"},
+		// auto_service_type semantics follow DeepFlow trident.proto
+		// AutoServiceType + zerotrace-server RESOURCE_TYPE_TO_NODE_TYPE:
+		// 1=CHOST, 12=REDIS_INSTANCE, 13=RDS_INSTANCE, 15=LOAD_BALANCE,
+		// 16=NAT_GATEWAY, 101=POD_GROUP, 102=SERVICE, 103=POD_CLUSTER,
+		// 104=CUSTOM_SERVICE (UI name biz_service, per api_cache),
+		// 120=PROCESS, 130-135=POD_GROUP_*, 255=IP.
 		"auto_service_type": {
-			"0": "未知", "1": "虚拟机",
-			"10": "Pod", "11": "Pod Service", "15": "RDS 实例",
-			"103": "业务服务", "104": "业务服务组",
-			"105": "ALB", "120": "NAT 网关",
-			"130": "对等连接", "133": "VPN 网关", "255": "其他",
+			"0": "公网 IP", "1": "云主机",
+			"10": "Pod", "11": "Pod Service", "12": "Redis", "13": "RDS",
+			"14": "Pod 节点", "15": "负载均衡", "16": "NAT 网关",
+			"101": "Pod 组", "102": "服务",
+			"103": "Pod 集群", "104": "业务服务",
+			"105": "ALB", "120": "进程",
+			"130": "Pod 组", "131": "Pod 组", "132": "Pod 组",
+			"133": "Pod 组", "134": "Pod 组", "135": "Pod 组",
+			"255": "IP",
 		},
 		"auto_instance_type": {
 			"0": "未知", "1": "虚拟机",

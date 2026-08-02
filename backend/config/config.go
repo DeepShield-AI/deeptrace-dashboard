@@ -3,13 +3,25 @@ package config
 import (
 	"bufio"
 	"fmt"
-	"log"
 	"os"
 	"strings"
+
+	"deeptrace-backend/logging"
 )
 
 // CHConfig holds ClickHouse connection parameters.
 type CHConfig struct {
+	Host     string
+	Port     int
+	Database string
+	User     string
+	Password string
+}
+
+// MysqlConfig holds optional deepflow metadb (MySQL) connection parameters.
+// When configured, auth handlers read the real user/org from t_user/t_org
+// instead of the hardcoded fallback.
+type MysqlConfig struct {
 	Host     string
 	Port     int
 	Database string
@@ -29,6 +41,14 @@ type Config struct {
 
 	// ClickHouse (optional — nil if not configured).
 	ClickHouse *CHConfig
+
+	// MySQL metadb (optional — nil keeps the hardcoded auth identities).
+	MySQL *MysqlConfig
+
+	// VerifySourceControl enables client-selected data sources via
+	// X-DeepTrace-Force-Source. Local verification only — must stay false
+	// on public deployments.
+	VerifySourceControl bool
 }
 
 // init loads .env file before any config reading.
@@ -73,18 +93,19 @@ func loadEnvFile() {
 			}
 		}
 		_ = f.Close()
-		log.Printf("📄 Loaded config from %s", name)
+		logging.Infof("Loaded config from %s", name)
 	}
 }
 
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
 	cfg := &Config{
-		Port:           envStr("PORT", "8888"),
-		StaticDir:      envStr("STATIC_DIR", "../cloud.deepflow.yunshan.net"),
-		CacheDir:       envStr("CACHE_DIR", "../api_cache"),
-		ZerotraceAddr:  os.Getenv("ZEROTRACE_ADDR"),
-		AlgorithmsAddr: os.Getenv("ALGORITHMS_ADDR"),
+		Port:                envStr("PORT", "8888"),
+		StaticDir:           envStr("STATIC_DIR", "../cloud.deepflow.yunshan.net"),
+		CacheDir:            envStr("CACHE_DIR", "../api_cache"),
+		ZerotraceAddr:       os.Getenv("ZEROTRACE_ADDR"),
+		AlgorithmsAddr:      os.Getenv("ALGORITHMS_ADDR"),
+		VerifySourceControl: os.Getenv("VERIFY_SOURCE_CONTROL") == "true",
 	}
 
 	if h := os.Getenv("CLICKHOUSE_HOST"); h != "" {
@@ -97,23 +118,17 @@ func Load() *Config {
 		}
 	}
 
+	if h := os.Getenv("MYSQL_HOST"); h != "" {
+		cfg.MySQL = &MysqlConfig{
+			Host:     h,
+			Port:     envInt("MYSQL_PORT", 3306),
+			Database: envStr("MYSQL_DATABASE", "deepflow"),
+			User:     envStr("MYSQL_USER", "root"),
+			Password: os.Getenv("MYSQL_PASSWORD"),
+		}
+	}
+
 	return cfg
-}
-
-// ZerotraceServerURL returns the full base URL for the zerotrace-server, or "" if not configured.
-func (c *Config) ZerotraceServerURL() string {
-	if c.ZerotraceAddr == "" {
-		return ""
-	}
-	return fmt.Sprintf("http://%s", c.ZerotraceAddr)
-}
-
-// AlgorithmsServerURL returns the full base URL for zerotrace-algorithms, or "" if not configured.
-func (c *Config) AlgorithmsServerURL() string {
-	if c.AlgorithmsAddr == "" {
-		return ""
-	}
-	return fmt.Sprintf("http://%s", c.AlgorithmsAddr)
 }
 
 // ---------------------------------------------------------------------------

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"strings"
 	"time"
+
+	"deeptrace-backend/logging"
 )
 
 // AlgorithmsService is an HTTP client for zerotrace-algorithms (port 20418).
@@ -40,19 +42,19 @@ func (a *AlgorithmsService) Available() bool {
 // ---------------------------------------------------------------------------
 
 type L7FlowTracingRequest struct {
-	Region           string   `json:"REGION,omitempty"`
-	TimeStart        int64    `json:"TIME_START"`
-	TimeEnd          int64    `json:"TIME_END"`
-	Database         string   `json:"DATABASE"`
-	Table            string   `json:"TABLE"`
-	ID               string   `json:"_id,omitempty"`
-	TraceID          string   `json:"trace_id,omitempty"`
-	Debug            bool     `json:"DEBUG,omitempty"`
-	MaxIteration     int      `json:"MAX_ITERATION,omitempty"`
-	NetworkDelayUS   int      `json:"NETWORK_DELAY_US,omitempty"`
-	HostClockOffset  int      `json:"HOST_CLOCK_OFFSET_US,omitempty"`
-	SignalSources    []string `json:"SIGNAL_SOURCES,omitempty"`
-	HasAttributes    int      `json:"has_attributes,omitempty"`
+	Region          string   `json:"REGION,omitempty"`
+	TimeStart       int64    `json:"TIME_START"`
+	TimeEnd         int64    `json:"TIME_END"`
+	Database        string   `json:"DATABASE"`
+	Table           string   `json:"TABLE"`
+	ID              string   `json:"_id,omitempty"`
+	TraceID         string   `json:"trace_id,omitempty"`
+	Debug           bool     `json:"DEBUG,omitempty"`
+	MaxIteration    int      `json:"MAX_ITERATION,omitempty"`
+	NetworkDelayUS  int      `json:"NETWORK_DELAY_US,omitempty"`
+	HostClockOffset int      `json:"HOST_CLOCK_OFFSET_US,omitempty"`
+	SignalSources   []string `json:"SIGNAL_SOURCES,omitempty"`
+	HasAttributes   int      `json:"has_attributes,omitempty"`
 }
 
 // L7FlowTracingResponse is the top-level response from tracing API.
@@ -69,20 +71,20 @@ type L7FlowTracingResponse struct {
 // ---------------------------------------------------------------------------
 
 type AppSpan struct {
-	StartTimeUS   int64  `json:"start_time_us"`
-	EndTimeUS     int64  `json:"end_time_us"`
-	SpanKind      int    `json:"span_kind"`
-	TraceID       string `json:"trace_id"`
-	SpanID        string `json:"span_id"`
-	ParentSpanID  string `json:"parent_span_id"`
+	StartTimeUS  int64  `json:"start_time_us"`
+	EndTimeUS    int64  `json:"end_time_us"`
+	SpanKind     int    `json:"span_kind"`
+	TraceID      string `json:"trace_id"`
+	SpanID       string `json:"span_id"`
+	ParentSpanID string `json:"parent_span_id"`
 }
 
 type TracingCompletionRequest struct {
-	AppSpans         []AppSpan `json:"APP_SPANS"`
-	MaxIteration     int       `json:"MAX_ITERATION,omitempty"`
-	NetworkDelayUS   int       `json:"NETWORK_DELAY_US,omitempty"`
-	Debug            bool      `json:"DEBUG,omitempty"`
-	SignalSources    []string  `json:"SIGNAL_SOURCES,omitempty"`
+	AppSpans       []AppSpan `json:"APP_SPANS"`
+	MaxIteration   int       `json:"MAX_ITERATION,omitempty"`
+	NetworkDelayUS int       `json:"NETWORK_DELAY_US,omitempty"`
+	Debug          bool      `json:"DEBUG,omitempty"`
+	SignalSources  []string  `json:"SIGNAL_SOURCES,omitempty"`
 }
 
 type TracingCompletionResponse struct {
@@ -173,7 +175,7 @@ func (a *AlgorithmsService) doPost(path string, reqBody interface{}) (*L7FlowTra
 	}
 
 	url := a.baseURL + path
-	log.Printf("🔬 ALGO POST %s body=%d", path, len(data))
+	logging.Debugf("ALGO POST %s body=%d", path, len(data))
 
 	httpResp, err := a.httpClient.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
@@ -185,6 +187,14 @@ func (a *AlgorithmsService) doPost(path string, reqBody interface{}) (*L7FlowTra
 	if err != nil {
 		return nil, fmt.Errorf("algorithms read failed: %w", err)
 	}
+	// Non-2xx bodies are error payloads, not tracing responses.
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		snippet := strings.TrimSpace(string(body))
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("algorithms POST failed: http %d: %s", httpResp.StatusCode, snippet)
+	}
 
 	var resp L7FlowTracingResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
@@ -192,5 +202,3 @@ func (a *AlgorithmsService) doPost(path string, reqBody interface{}) (*L7FlowTra
 	}
 	return &resp, nil
 }
-
-// Ensure the import is used.

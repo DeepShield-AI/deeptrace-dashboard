@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 
 	"deeptrace-backend/cache"
@@ -9,13 +8,18 @@ import (
 	"deeptrace-backend/client"
 	"deeptrace-backend/config"
 	"deeptrace-backend/enum"
+	"deeptrace-backend/logging"
 	"deeptrace-backend/query"
+	"deeptrace-backend/query/region"
 	"deeptrace-backend/source"
 	"deeptrace-backend/transport"
 )
 
 func main() {
 	cfg := config.Load()
+
+	// Leveled logging: colored stdout + logs/serve.log (level from LOG_LEVEL).
+	logging.Init(".")
 
 	// Initialize optional services.
 	var cch *clickhouse.CHService
@@ -29,17 +33,27 @@ func main() {
 	// Always available: cache + file-based aggregator.
 	cchCache := cache.New(cfg.CacheDir)
 
-	// Build the DataSource priority chain.
+	// Build the DataSource priority chain (ZT → ClickHouse → exact cache).
 	chain := query.NewDataSourceChain()
 	ztDS := source.NewZerotraceDataSource(ztSvc)
 	chain.AddListSource(ztDS)
 	chain.AddTopSource(ztDS)
 
 	chDS := source.NewCHDataSource(cch)
-	chain.AddFlowLogSource(chDS)
 	chain.AddTraceMapSource(chDS)
 	chain.AddTopSource(chDS)
 	chain.AddListSource(chDS)
+
+	cacheDS := source.NewCacheDataSource(cchCache)
+	chain.AddListSource(cacheDS)
+	chain.AddTopSource(cacheDS)
+	chain.AddTraceMapSource(cacheDS)
+
+	// Profile (flame graph) chain: CH → cache. ZT is intentionally NOT
+	// registered — deepflow-server cannot serve profile queries (sum()
+	// aggregation unsupported, zstd columns corrupted over JSON).
+	chain.AddProfileSource(chDS)
+	chain.AddProfileSource(cacheDS)
 
 	// Create the query service (central business logic entry point).
 	enumSvc := enum.NewEnumService(cch)
@@ -52,33 +66,47 @@ func main() {
 		Enum:      enumSvc,
 	}
 
+	// Region registry: loaded from deepflow-server's region dictionary.
+	// On success it also sets clickhouse.QuerierRegion to the real default name.
+	regionSvc := region.New(ztSvc)
+	regionSvc.Load()
+
 	deps := &transport.Dependencies{
 		Cache:      cchCache,
 		CH:         cch,
 		Algorithms: algoSvc,
 		Querier:    querierSvc,
+		Region:     regionSvc,
 		StaticDir:  cfg.StaticDir,
 	}
+
+	// Optional MySQL metadb access: real user/org for auth handlers when
+	// MYSQL_HOST is configured; otherwise the hardcoded identities stay.
+	transport.SetUserStore(transport.NewUserStore(cfg.MySQL))
 
 	mux := http.NewServeMux()
 	transport.RegisterAll(mux, deps)
 
 	addr := ":" + cfg.Port
-	log.Printf("🚀 DeepTrace Backend starting on %s", addr)
-	log.Printf("   Static: %s", cfg.StaticDir)
+	logging.Infof("DeepTrace Backend starting on %s", addr)
+	logging.Infof("Static: %s", cfg.StaticDir)
+	if cfg.VerifySourceControl {
+		logging.Warnf("VERIFY_SOURCE_CONTROL enabled — client-selected data sources allowed (local verification only)")
+	}
 	if deps.Cache != nil {
-		log.Printf("   Cache:  %d entries", deps.Cache.Len())
+		logging.Infof("Cache: %d entries", deps.Cache.Len())
 	}
 	if deps.CH != nil && deps.CH.Enabled() {
-		log.Printf("   ✅ ClickHouse query engine enabled")
+		logging.Infof("ClickHouse query engine enabled")
 	} else {
-		log.Printf("   ⚠️  ClickHouse not available (using files)")
+		logging.Warnf("ClickHouse not available (using files)")
 	}
 	if deps.Querier != nil && deps.Querier.Zerotrace != nil {
-		log.Printf("   ✅ Zerotrace-server: %s", cfg.ZerotraceAddr)
+		logging.Infof("Zerotrace-server: %s", cfg.ZerotraceAddr)
 	}
 	if deps.Algorithms != nil {
-		log.Printf("   ✅ Algorithms: %s", cfg.AlgorithmsAddr)
+		logging.Infof("Algorithms: %s", cfg.AlgorithmsAddr)
 	}
-	log.Fatal(http.ListenAndServe(addr, transport.CORS(mux)))
+	handler := transport.CORS(transport.SourceControlMiddleware(cfg.VerifySourceControl)(mux))
+	logging.Fatalf("http server: %v", http.ListenAndServe(addr, handler))
 }
