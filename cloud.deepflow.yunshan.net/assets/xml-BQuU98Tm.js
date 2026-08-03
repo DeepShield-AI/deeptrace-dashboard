@@ -1,1 +1,0 @@
-import{Ft as e,It as t}from"./other-vendor-nQc8cw6U.js";import"./browser-vendor-DzueQaQs.js";export{e as conf,t as language};

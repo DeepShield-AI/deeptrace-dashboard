@@ -1,1 +1,0 @@
-var e=(e,t)=>{let n=Number(!!e.STAR),r=Number(!!t.STAR);return n===r?e.NAME.localeCompare(t.NAME,`zh-CN`):r-n};export{e as t};

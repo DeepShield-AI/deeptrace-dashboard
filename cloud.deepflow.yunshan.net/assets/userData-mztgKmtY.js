@@ -1,1 +1,0 @@
-import{n as e}from"./api-DbeYCvWZ.js";function t(t){return e(`/userData`,t)}function n(t){return e(`/userData/post`,t)}export{n,t};

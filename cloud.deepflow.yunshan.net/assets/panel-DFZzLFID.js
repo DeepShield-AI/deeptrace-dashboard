@@ -1,1 +1,0 @@
-var e=e=>`LABEL_NAME`in e;export{e as t};
